@@ -44,8 +44,9 @@
         <details class="add-project">
           <summary>Добавить проект</summary>
           <form id="project-form">
-            <input id="project-name" placeholder="Название проекта" required />
-            <input id="project-path" placeholder="/path/to/project" required />
+            <label for="project-folder">Папка в каталоге проектов</label>
+            <div id="project-root-hint" class="project-root-hint"></div>
+            <input id="project-folder" placeholder="veyra" autocomplete="off" required />
             <button type="submit">Добавить</button>
           </form>
         </details>
@@ -98,6 +99,19 @@
         </form>
       </section>
       <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню"></button>
+
+      <div id="create-project-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="create-project-title" hidden>
+        <button class="confirm-backdrop" type="button" data-cancel-project aria-label="Отменить"></button>
+        <section class="confirm-panel">
+          <h2 id="create-project-title">Проект не найден</h2>
+          <p>Папка <strong id="create-project-path"></strong> не существует.</p>
+          <p>Создать её и инициализировать новый Git-проект?</p>
+          <div class="confirm-actions">
+            <button type="button" class="confirm-cancel" data-cancel-project>Отмена</button>
+            <button id="confirm-create-project" type="button" class="confirm-create">Создать проект</button>
+          </div>
+        </section>
+      </div>
 
       <div id="limits-modal" class="limits-modal" role="dialog" aria-modal="true" aria-labelledby="limits-title" hidden>
         <button class="limits-backdrop" type="button" data-close-limits aria-label="Закрыть лимиты"></button>

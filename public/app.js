@@ -9,6 +9,8 @@ function loadDrafts() {
 
 const state = {
   projects: [],
+  projectRoots: [],
+  pendingProject: null,
   sessions: [],
   sessionId: null,
   source: null,
@@ -34,6 +36,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setSidebarOpen(false);
     closeLimits();
+    closeCreateProject();
   }
 });
 window.matchMedia("(min-width: 761px)").addEventListener("change", (event) => {
@@ -168,7 +171,11 @@ async function api(path, options = {}) {
     location.replace("/login");
     throw new Error("Требуется вход");
   }
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(body.error ?? `HTTP ${response.status}`);
+    if (body && typeof body === "object") Object.assign(error, body);
+    throw error;
+  }
   return body;
 }
 
@@ -179,8 +186,12 @@ function setConnection(text) {
 }
 
 async function loadProjects() {
-  const { projects } = await api("/api/projects");
+  const { projects, projectRoots = [] } = await api("/api/projects");
   state.projects = projects;
+  state.projectRoots = projectRoots;
+  $("#project-root-hint").textContent = projectRoots[0]
+    ? `Будет найдено или создано в ${projectRoots[0]}`
+    : "Корневая папка проектов не настроена";
   $("#project").innerHTML = projects
     .map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
     .join("");
@@ -630,20 +641,56 @@ $("#project").addEventListener("change", async () => {
   renderEvents();
 });
 
+const createProjectModal = $("#create-project-modal");
+
+function closeCreateProject() {
+  createProjectModal.hidden = true;
+  state.pendingProject = null;
+}
+
+async function addProject(folder, create = false) {
+  const { project } = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ path: folder, create }),
+  });
+  $("#project-form").reset();
+  await loadProjects();
+  $("#project").value = project.id;
+  await loadSessions();
+  closeCreateProject();
+}
+
 $("#project-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const folder = $("#project-folder").value.trim();
+  if (!folder) return;
   try {
-    await api("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({
-        name: $("#project-name").value,
-        path: $("#project-path").value,
-      }),
-    });
-    event.target.reset();
-    await loadProjects();
+    await addProject(folder);
+  } catch (error) {
+    if (error.code === "PROJECT_NOT_FOUND") {
+      state.pendingProject = folder;
+      $("#create-project-path").textContent = error.path;
+      createProjectModal.hidden = false;
+      return;
+    }
+    alert(error.message);
+  }
+});
+
+document.querySelectorAll("[data-cancel-project]").forEach((button) => {
+  button.addEventListener("click", closeCreateProject);
+});
+
+$("#confirm-create-project").addEventListener("click", async () => {
+  if (!state.pendingProject) return;
+  const button = $("#confirm-create-project");
+  button.disabled = true;
+  try {
+    await addProject(state.pendingProject, true);
   } catch (error) {
     alert(error.message);
+  } finally {
+    button.disabled = false;
   }
 });
 

@@ -6,7 +6,7 @@ import { AuthManager } from "./auth.js";
 import { CodexAccountClient } from "./codex-account.js";
 import { config } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
-import { validateProjectPath } from "./project-path.js";
+import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
 import type { StoredEvent } from "./types.js";
@@ -101,17 +101,29 @@ async function handleApi(
   }
 
   if (request.method === "GET" && url.pathname === "/api/projects") {
-    json(response, 200, { projects: store.listProjects() });
+    json(response, 200, { projects: store.listProjects(), projectRoots: config.projectRoots });
     return true;
   }
 
   if (request.method === "POST" && url.pathname === "/api/projects") {
-    const body = await readJson<{ name?: unknown; path?: unknown }>(request);
-    const name = requireString(body.name, "name");
-    const path = await validateProjectPath(
-      requireString(body.path, "path"),
-      config.projectRoots,
-    );
+    const body = await readJson<{ name?: unknown; path?: unknown; create?: unknown }>(request);
+    const requestedPath = requireString(body.path, "path");
+    const resolution = await resolveProjectPath(requestedPath, config.projectRoots);
+    if (!resolution.exists && body.create !== true) {
+      json(response, 409, {
+        error: "Project directory does not exist",
+        code: "PROJECT_NOT_FOUND",
+        path: resolution.path,
+        folder: resolution.folder,
+      });
+      return true;
+    }
+    const path = resolution.exists
+      ? resolution.path
+      : await createProjectDirectory(resolution.path, config.projectRoots);
+    const name = typeof body.name === "string" && body.name.trim()
+      ? body.name.trim()
+      : resolution.folder;
     const project = store.createProject({
       id: randomUUID(),
       name,
