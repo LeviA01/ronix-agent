@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Вход — Ronix Agent</title>
+    <link rel="stylesheet" href="/login.css" />
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="login-card">
+        <div class="brand-mark">R</div>
+        <h1>Ronix Agent</h1>
+        <p>Введите ключ доступа к этому серверу.</p>
+        <form id="login-form">
+          <label for="key">Ключ доступа</label>
+          <div class="key-row">
+            <input id="key" name="key" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" required autofocus />
+            <button id="toggle-key" class="toggle-key" type="button" aria-label="Показать ключ">Показать</button>
+          </div>
+          <p id="error" class="error" role="alert" hidden></p>
+          <button id="submit" class="submit" type="submit">Войти</button>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

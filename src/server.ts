@@ -1,7 +1,8 @@
 import { createReadStream, existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { AuthManager } from "./auth.js";
 import { config } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
 import { validateProjectPath } from "./project-path.js";
@@ -12,13 +13,21 @@ import type { StoredEvent } from "./types.js";
 const store = new Store(config.dataDir);
 const sessions = new SessionManager(store, config.codexPath);
 const publicDir = join(process.cwd(), "public");
+const auth = new AuthManager(
+  config.authKey,
+  config.authSessionDays * 24 * 60 * 60 * 1000,
+  config.secureAuthCookie,
+);
 
-function authorized(request: IncomingMessage): boolean {
-  if (!config.authToken) return true;
-  const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
-  const expected = Buffer.from(config.authToken);
-  const actual = Buffer.from(supplied);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
+function clientId(request: IncomingMessage): string {
+  const forwarded = request.headers["x-forwarded-for"];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return value?.split(",", 1)[0]?.trim() || request.socket.remoteAddress || "unknown";
+}
+
+function redirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, { location, "cache-control": "no-store" });
+  response.end();
 }
 
 function sendSse(response: ServerResponse, event: StoredEvent): void {
@@ -37,8 +46,40 @@ async function handleApi(
   url: URL,
 ): Promise<boolean> {
   if (!url.pathname.startsWith("/api/")) return false;
-  if (!authorized(request)) {
+
+  if (request.method === "GET" && url.pathname === "/api/auth/status") {
+    json(response, 200, {
+      enabled: auth.enabled,
+      authenticated: auth.authorized(request),
+    });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/login") {
+    const body = await readJson<{ key?: unknown }>(request);
+    const suppliedKey = typeof body.key === "string" ? body.key : "";
+    const result = auth.login(response, suppliedKey, clientId(request));
+    if (!result.ok) {
+      if (result.retryAfterSeconds) {
+        response.setHeader("retry-after", String(result.retryAfterSeconds));
+        json(response, 429, { error: "Слишком много попыток. Попробуйте позже." });
+      } else {
+        json(response, 401, { error: "Неверный ключ доступа" });
+      }
+      return true;
+    }
+    json(response, 200, { authenticated: true });
+    return true;
+  }
+
+  if (!auth.authorized(request)) {
     json(response, 401, { error: "Unauthorized" });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+    auth.logout(request, response);
+    json(response, 200, { authenticated: false });
     return true;
   }
 
@@ -186,6 +227,20 @@ const server = createServer(async (request, response) => {
     if (await handleApi(request, response, url)) return;
     if (request.method !== "GET" && request.method !== "HEAD") {
       throw new HttpError(405, "Method not allowed");
+    }
+    if (auth.enabled && (url.pathname === "/" || url.pathname === "/index.html")) {
+      if (!auth.authorized(request)) {
+        redirect(response, "/login");
+        return;
+      }
+    }
+    if (url.pathname === "/login" || url.pathname === "/login.html") {
+      if (auth.enabled && auth.authorized(request)) {
+        redirect(response, "/");
+        return;
+      }
+      serveStatic(response, "/login.html", request.method === "HEAD");
+      return;
     }
     serveStatic(response, url.pathname, request.method === "HEAD");
   } catch (error) {

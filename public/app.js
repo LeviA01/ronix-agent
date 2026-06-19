@@ -19,6 +19,24 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
+const appShell = $(".app-shell");
+
+function setSidebarOpen(open) {
+  appShell.classList.toggle("sidebar-open", open);
+  $("#open-sidebar").setAttribute("aria-expanded", String(open));
+  if (open) $("#project").focus({ preventScroll: true });
+}
+
+$("#open-sidebar").addEventListener("click", () => setSidebarOpen(true));
+$("#close-sidebar").addEventListener("click", () => setSidebarOpen(false));
+$("#sidebar-backdrop").addEventListener("click", () => setSidebarOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSidebarOpen(false);
+});
+window.matchMedia("(min-width: 761px)").addEventListener("change", (event) => {
+  if (event.matches) setSidebarOpen(false);
+});
+
 $("#show-technical").checked = state.showTechnical;
 $("#show-technical").addEventListener("change", (event) => {
   state.showTechnical = event.target.checked;
@@ -38,6 +56,10 @@ async function api(path, options = {}) {
     headers: { ...headers(Boolean(options.body)), ...options.headers },
   });
   const body = response.status === 204 ? null : await response.json();
+  if (response.status === 401) {
+    location.replace("/login");
+    throw new Error("Требуется вход");
+  }
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
   return body;
 }
@@ -144,6 +166,7 @@ function closeSessionMenus() {
 document.addEventListener("click", closeSessionMenus);
 
 async function selectSession(id) {
+  setSidebarOpen(false);
   closeSessionMenus();
   saveCurrentDraft();
   state.source?.close();
@@ -209,6 +232,10 @@ function connectEvents() {
 async function streamEvents(path, signal) {
   try {
     const response = await fetch(path, { headers: headers(), signal });
+    if (response.status === 401) {
+      location.replace("/login");
+      return;
+    }
     if (!response.ok || !response.body) throw new Error(`SSE HTTP ${response.status}`);
     setConnection("connected");
     const reader = response.body.getReader();
@@ -581,6 +608,21 @@ function restoreDraft(sessionId) {
 function persistDrafts() {
   localStorage.setItem("ronix-agent-drafts", JSON.stringify(state.drafts));
 }
+
+fetch("/api/auth/status")
+  .then((response) => response.ok ? response.json() : null)
+  .then((status) => {
+    if (status?.enabled) $("#logout").hidden = false;
+  })
+  .catch(() => {});
+
+$("#logout").addEventListener("click", async () => {
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } finally {
+    location.replace("/login");
+  }
+});
 
 $("#interrupt").addEventListener("click", async () => {
   if (!state.sessionId) return;
