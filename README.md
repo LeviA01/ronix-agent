@@ -28,8 +28,9 @@ npm run dev
 
 Открыть `http://127.0.0.1:8787`.
 
-По умолчанию можно регистрировать проекты только внутри
-`/home/ronix/Projects/RONIX`. Настройки:
+Ronix разрешает добавлять проекты только из каталогов, перечисленных в
+`PROJECT_ROOTS`. Для локального запуска значение по умолчанию —
+`/home/ronix/Projects/RONIX`:
 
 ```bash
 HOST=127.0.0.1
@@ -38,6 +39,11 @@ DATA_DIR=./data
 PROJECT_ROOTS=/home/ronix/Projects/RONIX,/another/allowed/root
 CODEX_PATH=/usr/bin/codex
 ```
+
+В production-примере ниже используется отдельный каталог
+`/srv/ronix-projects`. Это не дополнительная встроенная папка, а значение
+`PROJECT_ROOTS` из systemd-сервиса. Создаваемый или добавляемый проект должен
+находиться внутри одного из указанных корневых каталогов.
 
 ## Доступ по ключу
 
