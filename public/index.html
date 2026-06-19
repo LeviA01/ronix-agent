@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ronix Agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">R</div>
+          <div>
+            <h1>Ronix</h1>
+            <p>Codex control</p>
+          </div>
+          <span id="connection" class="connection-dot" title="offline"></span>
+        </div>
+
+        <div class="project-picker">
+          <label for="project">Проект</label>
+          <div class="project-row">
+            <select id="project"></select>
+            <button id="new-session" class="icon-button" title="Новая сессия" aria-label="Новая сессия">+</button>
+          </div>
+        </div>
+
+        <div class="sessions-head">
+          <span>Сессии</span>
+          <span id="session-count" class="count">0</span>
+        </div>
+        <div id="sessions" class="session-list"></div>
+
+        <details class="add-project">
+          <summary>Добавить проект</summary>
+          <form id="project-form">
+            <input id="project-name" placeholder="Название проекта" required />
+            <input id="project-path" placeholder="/path/to/project" required />
+            <button type="submit">Добавить</button>
+          </form>
+        </details>
+      </aside>
+
+      <section class="chat">
+        <header class="chat-head">
+          <div>
+            <h2 id="session-title">Выберите сессию</h2>
+            <p id="session-meta">Создайте сессию, чтобы начать работу</p>
+          </div>
+          <div class="chat-actions">
+            <label class="debug-toggle" title="Показывать сырые события Codex">
+              <input id="show-technical" type="checkbox" />
+              <span>Технические</span>
+            </label>
+            <button id="interrupt" class="interrupt-button" disabled>Стоп</button>
+          </div>
+        </header>
+
+        <div id="events" class="events">
+          <div class="empty-state">
+            <div class="empty-icon">›_</div>
+            <h3>Codex готов к работе</h3>
+            <p>Выберите или создайте сессию проекта.</p>
+          </div>
+        </div>
+
+        <form id="prompt-form" class="composer">
+          <textarea id="prompt" rows="1" placeholder="Напишите задачу для Codex…" required></textarea>
+          <button id="send" type="submit" disabled aria-label="Отправить">
+            <span>↑</span>
+          </button>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
