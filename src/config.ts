@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
 function integer(value: string | undefined, fallback: number): number {
@@ -17,13 +18,22 @@ function boolean(value: string | undefined, fallback: boolean): boolean {
   throw new Error(`Expected a boolean, received: ${value}`);
 }
 
-function findOnPath(command: string): string | null {
+function findCodex(): string | null {
+  if (process.env.CODEX_PATH) {
+    const configured = resolve(process.env.CODEX_PATH);
+    if (existsSync(configured)) return configured;
+    console.warn(`Configured CODEX_PATH does not exist: ${configured}`);
+  }
+
+  const command = process.platform === "win32" ? "codex.exe" : "codex";
   for (const directory of (process.env.PATH ?? "").split(delimiter)) {
     if (!directory) continue;
     const candidate = join(directory, command);
     if (existsSync(candidate)) return candidate;
   }
-  return null;
+
+  const userInstall = join(homedir(), ".local", "bin", command);
+  return existsSync(userInstall) ? userInstall : null;
 }
 
 export const config = {
@@ -37,9 +47,7 @@ export const config = {
     .split(",")
     .map((path) => resolve(path.trim()))
     .filter(Boolean),
-  codexPath: process.env.CODEX_PATH
-    ? resolve(process.env.CODEX_PATH)
-    : findOnPath(process.platform === "win32" ? "codex.exe" : "codex"),
+  codexPath: findCodex(),
 };
 
 if (config.authKey && Buffer.byteLength(config.authKey, "utf8") < 32) {

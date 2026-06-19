@@ -50,6 +50,10 @@
           </form>
         </details>
 
+        <button id="show-limits" class="limits-button" type="button">
+          <span>Лимиты Codex</span>
+          <span id="limits-summary">Проверить</span>
+        </button>
         <button id="logout" class="logout-button" type="button" hidden>Выйти</button>
       </aside>
 
@@ -94,6 +98,23 @@
         </form>
       </section>
       <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню"></button>
+
+      <div id="limits-modal" class="limits-modal" role="dialog" aria-modal="true" aria-labelledby="limits-title" hidden>
+        <button class="limits-backdrop" type="button" data-close-limits aria-label="Закрыть лимиты"></button>
+        <section class="limits-panel">
+          <header class="limits-head">
+            <div>
+              <h2 id="limits-title">Лимиты Codex</h2>
+              <p id="limits-account">Загрузка данных аккаунта…</p>
+            </div>
+            <button class="limits-close" type="button" data-close-limits aria-label="Закрыть">×</button>
+          </header>
+          <div id="limits-content" class="limits-content">
+            <div class="limits-loading">Получаем данные из Codex…</div>
+          </div>
+          <button id="refresh-limits" class="refresh-limits" type="button">Обновить</button>
+        </section>
+      </div>
     </main>
     <script type="module" src="/app.js"></script>
   </body>

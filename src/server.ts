@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AuthManager } from "./auth.js";
+import { CodexAccountClient } from "./codex-account.js";
 import { config } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
 import { validateProjectPath } from "./project-path.js";
@@ -12,6 +13,7 @@ import type { StoredEvent } from "./types.js";
 
 const store = new Store(config.dataDir);
 const sessions = new SessionManager(store, config.codexPath);
+const codexAccount = new CodexAccountClient(config.codexPath);
 const publicDir = join(process.cwd(), "public");
 const auth = new AuthManager(
   config.authKey,
@@ -90,6 +92,11 @@ async function handleApi(
       ok: true,
       codexRuntime: config.codexPath ?? "sdk-bundled",
     });
+    return true;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/codex/usage") {
+    json(response, 200, await codexAccount.getUsage(url.searchParams.get("refresh") === "1"));
     return true;
   }
 
