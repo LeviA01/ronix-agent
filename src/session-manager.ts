@@ -1,20 +1,59 @@
-import { Codex, type ThreadEvent, type ThreadOptions } from "@openai/codex-sdk";
 import { randomUUID } from "node:crypto";
+import type {
+  AppServerNotification,
+  AppServerRequest,
+  CodexAppServer,
+} from "./app-server-client.js";
 import type { Store } from "./store.js";
-import type { Session, StoredEvent } from "./types.js";
+import type {
+  PendingApproval,
+  SandboxMode,
+  Session,
+  StoredEvent,
+} from "./types.js";
 
 type EventListener = (event: StoredEvent) => void;
+type RpcId = number | string;
+
+type ThreadResponse = { thread: { id: string } };
+type TurnResponse = { turn: { id: string } };
+
+const APPROVAL_METHODS = new Set([
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+]);
+
+const TRANSIENT_EVENT_TYPES = [
+  "codex.item.agentMessage.delta",
+  "codex.item.commandExecution.outputDelta",
+  "codex.item.fileChange.outputDelta",
+  "codex.item.plan.delta",
+  "codex.item.reasoning.summaryTextDelta",
+  "codex.item.reasoning.textDelta",
+];
 
 export class SessionManager {
-  private readonly codex: Codex;
-  private readonly activeTurns = new Map<string, AbortController>();
   private readonly listeners = new Map<string, Set<EventListener>>();
+  private readonly pendingApprovals = new Map<string, PendingApproval & { rpcId: RpcId }>();
+  private readonly unsubscribers: Array<() => void>;
+  private shuttingDown = false;
 
   constructor(
     private readonly store: Store,
-    codexPath: string | null = null,
+    private readonly codex: CodexAppServer,
+    private readonly maximumEventsPerSession = 5_000,
   ) {
-    this.codex = new Codex(codexPath ? { codexPathOverride: codexPath } : undefined);
+    this.unsubscribers = [
+      codex.onNotification((notification) => this.handleNotification(notification)),
+      codex.onServerRequest((request) => this.handleServerRequest(request)),
+      codex.onExit((error) => this.handleAppServerExit(error)),
+    ];
+    for (const session of this.store.recoverRunningSessions()) {
+      this.publish(session.id, "session.error", { message: session.lastError });
+    }
+    for (const session of this.store.listSessions()) {
+      this.store.deleteEventsByTypes(session.id, TRANSIENT_EVENT_TYPES);
+    }
   }
 
   createSession(projectId: string): Session {
@@ -23,7 +62,9 @@ export class SessionManager {
       id: randomUUID(),
       projectId,
       threadId: null,
+      activeTurnId: null,
       status: "ready",
+      sandboxMode: "workspace-write",
       lastError: null,
       createdAt: now,
       lastActivityAt: now,
@@ -41,125 +82,277 @@ export class SessionManager {
   }
 
   async startTurn(sessionId: string, prompt: string): Promise<void> {
-    const session = this.store.getSession(sessionId);
-    if (!session) throw new Error("Session not found");
+    const session = this.requireSession(sessionId);
     if (session.status === "stopped") throw new Error("Session is stopped");
-    if (this.activeTurns.has(sessionId)) throw new Error("A turn is already running");
-
+    if (session.status === "running" || session.activeTurnId) {
+      throw new Error("A turn is already running");
+    }
     const project = this.store.getProject(session.projectId);
     if (!project) throw new Error("Project not found");
 
-    const controller = new AbortController();
-    this.activeTurns.set(sessionId, controller);
-    this.store.updateSession(sessionId, { status: "running", lastError: null });
     this.publish(sessionId, "user.message", { text: prompt });
+    try {
+      const thread = session.threadId
+        ? await this.codex.request<ThreadResponse>("thread/resume", {
+            threadId: session.threadId,
+            cwd: project.path,
+            sandbox: session.sandboxMode,
+            approvalPolicy: approvalPolicy(session.sandboxMode),
+            approvalsReviewer: "user",
+          })
+        : await this.codex.request<ThreadResponse>("thread/start", {
+            cwd: project.path,
+            sandbox: session.sandboxMode,
+            approvalPolicy: approvalPolicy(session.sandboxMode),
+            approvalsReviewer: "user",
+          });
 
-    const options: ThreadOptions = {
-      workingDirectory: project.path,
-      sandboxMode: "danger-full-access",
-      approvalPolicy: "never",
-      skipGitRepoCheck: false,
-    };
-    const thread = session.threadId
-      ? this.codex.resumeThread(session.threadId, options)
-      : this.codex.startThread(options);
-
-    void this.consumeTurn(sessionId, thread.runStreamed(prompt, { signal: controller.signal }));
+      if (thread.thread.id !== session.threadId) {
+        this.store.updateSession(sessionId, { threadId: thread.thread.id });
+      }
+      const turn = await this.codex.request<TurnResponse>("turn/start", {
+        threadId: thread.thread.id,
+        input: [{ type: "text", text: prompt }],
+      });
+      this.store.updateSession(sessionId, {
+        status: "running",
+        activeTurnId: turn.turn.id,
+        lastError: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.store.updateSession(sessionId, {
+        status: "error",
+        activeTurnId: null,
+        lastError: message,
+      });
+      this.publish(sessionId, "session.error", { message });
+      throw error;
+    }
   }
 
-  interrupt(sessionId: string): boolean {
-    const controller = this.activeTurns.get(sessionId);
-    if (!controller) return false;
-    controller.abort();
+  async interrupt(sessionId: string): Promise<boolean> {
+    const session = this.requireSession(sessionId);
+    if (!session.threadId || !session.activeTurnId) return false;
+    await this.codex.request("turn/interrupt", {
+      threadId: session.threadId,
+      turnId: session.activeTurnId,
+    });
     return true;
   }
 
-  stop(sessionId: string): Session {
-    this.interrupt(sessionId);
-    const session = this.store.updateSession(sessionId, { status: "stopped" });
+  async stop(sessionId: string): Promise<Session> {
+    const session = this.requireSession(sessionId);
+    if (session.activeTurnId) await this.interrupt(sessionId);
+    const updated = this.store.updateSession(sessionId, {
+      status: "stopped",
+      activeTurnId: null,
+    });
     this.publish(sessionId, "session.stopped", {});
-    return session;
+    return updated;
   }
 
   resume(sessionId: string): Session {
-    const session = this.store.getSession(sessionId);
-    if (!session) throw new Error("Session not found");
-    if (this.activeTurns.has(sessionId)) throw new Error("Session has an active turn");
+    const session = this.requireSession(sessionId);
+    if (session.status === "running" || session.activeTurnId) {
+      throw new Error("Session has an active turn");
+    }
     const updated = this.store.updateSession(sessionId, {
       status: "ready",
+      activeTurnId: null,
       lastError: null,
     });
     this.publish(sessionId, "session.resumed", {});
     return updated;
   }
 
+  updateSandboxMode(sessionId: string, sandboxMode: SandboxMode): Session {
+    const session = this.requireSession(sessionId);
+    if (session.status === "running" || session.activeTurnId) {
+      throw new Error("Cannot change access mode while a turn is running");
+    }
+    const updated = this.store.updateSession(sessionId, { sandboxMode });
+    this.publish(sessionId, "session.settings", { sandboxMode });
+    return updated;
+  }
+
+  listApprovals(sessionId: string): PendingApproval[] {
+    return [...this.pendingApprovals.values()]
+      .filter((approval) => approval.sessionId === sessionId)
+      .map(({ rpcId: _rpcId, ...approval }) => approval);
+  }
+
+  respondToApproval(sessionId: string, approvalId: string, decision: string): void {
+    const approval = this.pendingApprovals.get(approvalId);
+    if (!approval || approval.sessionId !== sessionId) throw new Error("Approval not found");
+    const allowed = ["accept", "acceptForSession", "decline", "cancel"];
+    if (!allowed.includes(decision)) throw new Error("Invalid approval decision");
+    this.codex.respond(approval.rpcId, { decision });
+    this.pendingApprovals.delete(approvalId);
+    this.publish(sessionId, "approval.resolved", { approvalId, decision });
+  }
+
   delete(sessionId: string): void {
-    if (this.activeTurns.has(sessionId)) {
+    const session = this.requireSession(sessionId);
+    if (session.status === "running" || session.activeTurnId) {
       throw new Error("Cannot delete a session while a turn is running");
     }
-    if (!this.store.deleteSession(sessionId)) {
-      throw new Error("Session not found");
-    }
+    if (!this.store.deleteSession(sessionId)) throw new Error("Session not found");
     this.listeners.delete(sessionId);
+    for (const [id, approval] of this.pendingApprovals) {
+      if (approval.sessionId === sessionId) {
+        this.codex.respond(approval.rpcId, { decision: "cancel" });
+        this.pendingApprovals.delete(id);
+      }
+    }
   }
 
-  private async consumeTurn(
-    sessionId: string,
-    streamedPromise: ReturnType<ReturnType<Codex["startThread"]>["runStreamed"]>,
-  ): Promise<void> {
-    let reportedTurnFailure: string | null = null;
-    try {
-      const { events } = await streamedPromise;
-      for await (const event of events) {
-        if (event.type === "turn.failed") reportedTurnFailure = event.error.message;
-        this.handleCodexEvent(sessionId, event);
-      }
-      const current = this.store.getSession(sessionId);
-      if (current?.status !== "stopped") {
-        if (reportedTurnFailure) {
-          this.store.updateSession(sessionId, {
-            status: "error",
-            lastError: reportedTurnFailure,
-          });
-          this.publish(sessionId, "session.error", { message: reportedTurnFailure });
-        } else {
-          this.store.updateSession(sessionId, { status: "ready" });
-          this.publish(sessionId, "session.ready", {});
-        }
-      }
-    } catch (error) {
-      const processError = error instanceof Error ? error.message : String(error);
-      const message = reportedTurnFailure ?? processError;
-      const aborted = this.activeTurns.get(sessionId)?.signal.aborted ?? false;
-      const current = this.store.getSession(sessionId);
-      if (current?.status !== "stopped") {
-        this.store.updateSession(sessionId, {
-          status: aborted ? "ready" : "error",
-          lastError: aborted ? null : message,
+  async getUsage(): Promise<unknown> {
+    const [account, limits, usage] = await Promise.all([
+      this.codex.request<{ account: unknown }>("account/read", { refreshToken: false }),
+      this.codex.request<Record<string, unknown>>("account/rateLimits/read"),
+      this.codex.request<Record<string, unknown>>("account/usage/read"),
+    ]);
+    return { account: account.account, ...limits, usage };
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
+    const running = this.store.listSessions().filter(
+      (session) => session.status === "running" && session.threadId && session.activeTurnId,
+    );
+    await Promise.allSettled(running.map((session) => this.interrupt(session.id)));
+    for (const session of running) {
+      this.store.updateSession(session.id, {
+        status: "error",
+        activeTurnId: null,
+        lastError: "Ronix stopped while the turn was running",
+      });
+    }
+    for (const approval of this.pendingApprovals.values()) {
+      this.codex.respond(approval.rpcId, { decision: "cancel" });
+    }
+    this.pendingApprovals.clear();
+    for (const unsubscribe of this.unsubscribers) unsubscribe();
+    await this.codex.close();
+  }
+
+  private handleNotification(notification: AppServerNotification): void {
+    const threadId = stringField(notification.params, "threadId")
+      ?? nestedStringField(notification.params, "thread", "id");
+    if (!threadId) return;
+    const session = this.store.getSessionByThreadId(threadId);
+    if (!session) return;
+
+    this.publish(
+      session.id,
+      "codex." + notification.method.replaceAll("/", "."),
+      notification.params,
+    );
+
+    if (notification.method === "turn/started") {
+      const turnId = nestedStringField(notification.params, "turn", "id");
+      if (turnId) {
+        this.store.updateSession(session.id, {
+          status: "running",
+          activeTurnId: turnId,
+          lastError: null,
         });
       }
-      if (aborted) {
-        this.publish(sessionId, "turn.interrupted", { message });
-      } else if (reportedTurnFailure) {
-        this.publish(sessionId, "session.error", { message });
+      return;
+    }
+
+    if (notification.method === "turn/completed") {
+      const status = nestedStringField(notification.params, "turn", "status");
+      const error = nestedStringField(notification.params, "turn", "error", "message");
+      const stopped = this.store.getSession(session.id)?.status === "stopped";
+      this.store.updateSession(session.id, {
+        status: stopped ? "stopped" : status === "failed" ? "error" : "ready",
+        activeTurnId: null,
+        lastError: status === "failed" ? error ?? "Codex turn failed" : null,
+      });
+      if (status === "failed") {
+        this.publish(session.id, "session.error", { message: error ?? "Codex turn failed" });
+      } else if (status === "interrupted") {
+        this.publish(session.id, "turn.interrupted", {});
       } else {
-        this.publish(sessionId, "turn.error", { message });
+        this.publish(session.id, "session.ready", {});
       }
-    } finally {
-      this.activeTurns.delete(sessionId);
+      this.store.deleteEventsByTypes(session.id, TRANSIENT_EVENT_TYPES);
     }
   }
 
-  private handleCodexEvent(sessionId: string, event: ThreadEvent): void {
-    if (event.type === "thread.started") {
-      this.store.updateSession(sessionId, { threadId: event.thread_id });
+  private handleServerRequest(request: AppServerRequest): void {
+    const threadId = stringField(request.params, "threadId");
+    const session = threadId ? this.store.getSessionByThreadId(threadId) : null;
+    if (!session || !APPROVAL_METHODS.has(request.method)) {
+      this.codex.respondError(request.id, -32601, "Unsupported Ronix server request");
+      return;
     }
-    this.publish(sessionId, `codex.${event.type}`, event);
+    const approvalId = String(request.id);
+    const approval = {
+      id: approvalId,
+      rpcId: request.id,
+      sessionId: session.id,
+      method: request.method,
+      payload: request.params,
+      createdAt: new Date().toISOString(),
+    };
+    this.pendingApprovals.set(approvalId, approval);
+    this.publish(session.id, "approval.requested", {
+      approvalId,
+      method: request.method,
+      ...request.params,
+    });
+  }
+
+  private handleAppServerExit(error: Error): void {
+    if (this.shuttingDown) return;
+    for (const session of this.store.listSessions()) {
+      if (session.status !== "running") continue;
+      this.store.updateSession(session.id, {
+        status: "error",
+        activeTurnId: null,
+        lastError: error.message,
+      });
+      this.publish(session.id, "session.error", { message: error.message });
+    }
+    this.pendingApprovals.clear();
+  }
+
+  private requireSession(sessionId: string): Session {
+    const session = this.store.getSession(sessionId);
+    if (!session) throw new Error("Session not found");
+    return session;
   }
 
   private publish(sessionId: string, type: string, payload: unknown): StoredEvent {
     const event = this.store.addEvent(sessionId, type, payload);
+    if (event.sequence % 100 === 0) {
+      this.store.pruneEvents(sessionId, this.maximumEventsPerSession);
+    }
     for (const listener of this.listeners.get(sessionId) ?? []) listener(event);
     return event;
   }
+}
+
+function approvalPolicy(sandboxMode: SandboxMode): "never" | "on-request" {
+  return sandboxMode === "danger-full-access" ? "never" : "on-request";
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  return typeof record[key] === "string" ? record[key] : null;
+}
+
+function nestedStringField(
+  record: Record<string, unknown>,
+  ...path: string[]
+): string | null {
+  let value: unknown = record;
+  for (const key of path) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return typeof value === "string" ? value : null;
 }

@@ -14,8 +14,16 @@ const state = {
   sessions: [],
   sessionId: null,
   source: null,
+  reconnectTimer: null,
   lastSequence: 0,
+  firstSequence: 0,
+  hasMoreEvents: false,
   events: [],
+  approvals: {},
+  sessionRefreshTimer: null,
+  liveResponse: null,
+  liveRenderFrame: null,
+  selectedSession: null,
   showTechnical: localStorage.getItem("ronix-agent-technical") === "true",
   drafts: loadDrafts(),
 };
@@ -182,7 +190,12 @@ async function api(path, options = {}) {
 function setConnection(text) {
   const indicator = $("#connection");
   indicator.className = `connection-dot ${text}`;
-  indicator.title = text;
+  indicator.title = {
+    connected: "Подключено",
+    ready: "Готово",
+    reconnecting: "Переподключение…",
+    error: "Ошибка подключения",
+  }[text] ?? text;
 }
 
 async function loadProjects() {
@@ -233,8 +246,17 @@ function renderSessions() {
               title="Опции сессии"
               aria-label="Опции сессии"
               aria-expanded="false"
-            >⋯</button>
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5"></circle>
+                <circle cx="12" cy="12" r="1.5"></circle>
+                <circle cx="19" cy="12" r="1.5"></circle>
+              </svg>
+            </button>
             <div class="session-menu" data-menu-id="${session.id}" hidden>
+              ${session.status === "stopped"
+                ? `<button class="resume-session" data-resume-id="${session.id}">Возобновить</button>`
+                : `<button class="stop-session" data-stop-id="${session.id}">Остановить</button>`}
               <button
                 class="delete-session"
                 data-delete-id="${session.id}"
@@ -259,6 +281,18 @@ function renderSessions() {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       void deleteSession(button.dataset.deleteId);
+    });
+  });
+  document.querySelectorAll(".stop-session").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void changeSessionState(button.dataset.stopId, "stop");
+    });
+  });
+  document.querySelectorAll(".resume-session").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void changeSessionState(button.dataset.resumeId, "resume");
     });
   });
 }
@@ -289,15 +323,37 @@ async function selectSession(id) {
   closeSessionMenus();
   saveCurrentDraft();
   state.source?.close();
+  clearTimeout(state.reconnectTimer);
   state.sessionId = id;
   state.lastSequence = 0;
+  state.firstSequence = 0;
+  state.hasMoreEvents = false;
   state.events = [];
+  state.approvals = {};
+  state.liveResponse = null;
+  state.selectedSession = null;
   renderEvents();
   renderSessions();
-  const { session } = await api(`/api/sessions/${id}`);
+  const { session, approvals = [] } = await api(`/api/sessions/${id}`);
+  for (const approval of approvals) state.approvals[approval.id] = approval;
+  renderEvents();
+  state.selectedSession = session;
   renderSessionMeta(session);
   restoreDraft(id);
-  connectEvents();
+  connectEvents(id, true);
+}
+
+async function changeSessionState(id, action) {
+  try {
+    await api(`/api/sessions/${id}/${action}`, { method: "POST" });
+    await loadSessions();
+    if (state.sessionId === id) {
+      const { session } = await api(`/api/sessions/${id}`);
+      renderSessionMeta(session);
+    }
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function deleteSession(id) {
@@ -317,12 +373,16 @@ async function deleteSession(id) {
       state.sessionId = null;
       state.events = [];
       state.lastSequence = 0;
+      state.firstSequence = 0;
+      state.hasMoreEvents = false;
+      state.approvals = {};
       promptInput.value = "";
       resizePrompt();
       $("#session-title").textContent = "Выберите сессию";
-      $("#session-meta").textContent = "Создайте сессию, чтобы начать работу";
+      renderSessionMeta(null);
       $("#send").disabled = true;
       $("#interrupt").disabled = true;
+      $("#sandbox-mode").disabled = true;
     }
 
     await loadSessions();
@@ -333,22 +393,51 @@ async function deleteSession(id) {
 }
 
 function renderSessionMeta(session) {
+  state.selectedSession = session;
+  const meta = $("#session-meta");
+  if (!session) {
+    $("#session-title").textContent = "Выберите сессию";
+    meta.className = "session-meta";
+    meta.innerHTML = '<span class="session-meta-dot"></span><span>Создайте сессию, чтобы начать работу</span>';
+    document.querySelector(".access-mode").hidden = true;
+    $("#interrupt").hidden = true;
+    return;
+  }
   $("#session-title").textContent = sessionTitle(session);
-  $("#session-meta").textContent = session.threadId
-    ? `${statusLabel(session.status)} · ${session.threadId.slice(0, 8)}`
-    : statusLabel(session.status);
+  meta.className = `session-meta ${session.status}`;
+  const thread = session.threadId ? ` · ${session.threadId.slice(0, 8)}` : "";
+  meta.innerHTML = `
+    <span class="session-meta-dot"></span>
+    <span>${escapeHtml(statusLabel(session.status) + thread)}</span>
+  `;
   $("#send").disabled = session.status === "running" || session.status === "stopped";
   $("#interrupt").disabled = session.status !== "running";
+  $("#interrupt").hidden = session.status !== "running";
+  const sandbox = $("#sandbox-mode");
+  sandbox.value = session.sandboxMode ?? "workspace-write";
+  sandbox.disabled = session.status === "running";
+  const accessMode = document.querySelector(".access-mode");
+  accessMode.hidden = false;
+  accessMode.className = `access-mode mode-${session.sandboxMode ?? "workspace-write"}`;
 }
 
-function connectEvents() {
-  if (!state.sessionId) return;
+function connectEvents(sessionId = state.sessionId, initial = false) {
+  if (!sessionId || sessionId !== state.sessionId) return;
+  clearTimeout(state.reconnectTimer);
   const controller = new AbortController();
   state.source = { close: () => controller.abort() };
-  void streamEvents(`/api/sessions/${state.sessionId}/events?after=${state.lastSequence}`, controller.signal);
+  const query = initial && state.lastSequence === 0
+    ? "tail=200"
+    : `after=${state.lastSequence}`;
+  void streamEvents(
+    `/api/sessions/${sessionId}/events?${query}`,
+    controller.signal,
+    sessionId,
+    initial,
+  );
 }
 
-async function streamEvents(path, signal) {
+async function streamEvents(path, signal, sessionId, initial) {
   try {
     const response = await fetch(path, { headers: headers(), signal });
     if (response.status === 401) {
@@ -372,30 +461,50 @@ async function streamEvents(path, signal) {
           .split("\n")
           .find((line) => line.startsWith("data: "))
           ?.slice(6);
-        if (data) handleEvent(JSON.parse(data));
+        if (data && sessionId === state.sessionId) handleEvent(JSON.parse(data), initial);
       }
     }
+    if (!signal.aborted && sessionId === state.sessionId) scheduleReconnect(sessionId);
   } catch (error) {
-    if (error.name !== "AbortError") {
+    if (error.name !== "AbortError" && sessionId === state.sessionId) {
       setConnection("reconnecting");
-      setTimeout(connectEvents, 1500);
+      scheduleReconnect(sessionId);
     }
   }
 }
 
-function handleEvent(event) {
-  if (event.sequence <= state.lastSequence) return;
-  state.lastSequence = event.sequence;
-  state.events.push(event);
-  renderEvents();
-  void refreshSelectedSession();
+function scheduleReconnect(sessionId) {
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = setTimeout(() => connectEvents(sessionId), 1500);
 }
 
-function renderEvents() {
+function handleEvent(event, initial = false) {
+  if (event.sequence <= state.lastSequence) return;
+  state.lastSequence = event.sequence;
+  if (!state.firstSequence) state.firstSequence = event.sequence;
+  state.events.push(event);
+  updateApprovalState(event);
+  updateLiveResponse(event);
+  if (event.type === "approval.requested" || event.type === "approval.resolved") {
+    renderEvents();
+  } else if (isLiveEvent(event)) {
+    scheduleLiveRender();
+  } else {
+    appendVisibleEvent(event);
+  }
+  if (isSessionStateEvent(event)) scheduleSessionRefresh();
+  if (initial && state.events.length === 200) {
+    state.hasMoreEvents = true;
+    renderEvents();
+  }
+}
+
+function renderEvents(scrollToBottom = true) {
   const container = $("#events");
   container.innerHTML = "";
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
-  if (events.length === 0) {
+  const hasApprovals = Object.keys(state.approvals).length > 0;
+  if (events.length === 0 && !hasApprovals) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">›_</div>
@@ -405,8 +514,181 @@ function renderEvents() {
     `;
     return;
   }
+  renderHistoryButton(container);
+  renderPendingApprovals(container);
   for (const event of events) appendEvent(event, container);
-  container.scrollTop = container.scrollHeight;
+  renderLiveResponse(container);
+  if (scrollToBottom) {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+}
+
+function appendVisibleEvent(event) {
+  const container = $("#events");
+  container.querySelector(".empty-state")?.remove();
+  const visible = state.showTechnical || visibleEvents([event]).length > 0;
+  const shouldScroll = isNearBottom(container);
+  if (event.type === "codex.item.completed" && isAgentMessage(event.payload?.item)) {
+    container.querySelector(".live-response")?.remove();
+  }
+  if (visible) appendEvent(event, container);
+  if (shouldScroll) {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+}
+
+function renderHistoryButton(container) {
+  if (!state.hasMoreEvents || !state.firstSequence) return;
+  const button = document.createElement("button");
+  button.id = "load-older";
+  button.className = "load-older";
+  button.type = "button";
+  button.textContent = "Загрузить предыдущие сообщения";
+  container.append(button);
+}
+
+function renderPendingApprovals(container) {
+  for (const approval of Object.values(state.approvals)) {
+    const event = {
+      type: "approval.requested",
+      payload: { approvalId: approval.id, method: approval.method, ...approval.payload },
+    };
+    appendEvent(event, container);
+  }
+}
+
+function updateLiveResponse(event) {
+  if (event.type === "codex.turn.started") {
+    state.liveResponse = { mode: "thinking", itemId: null, text: "", detail: "Анализирует задачу" };
+    setLocalSessionStatus("running");
+    return;
+  }
+  if (event.type === "codex.item.agentMessage.delta") {
+    const itemId = event.payload?.itemId ?? null;
+    if (!state.liveResponse || state.liveResponse.itemId !== itemId) {
+      state.liveResponse = { mode: "writing", itemId, text: "", detail: "Пишет ответ" };
+    }
+    state.liveResponse.mode = "writing";
+    state.liveResponse.detail = "Пишет ответ";
+    state.liveResponse.text += event.payload?.delta ?? "";
+    return;
+  }
+  if (event.type === "codex.item.started") {
+    const item = event.payload?.item;
+    if (isAgentMessage(item)) {
+      state.liveResponse = {
+        mode: "writing",
+        itemId: item.id ?? null,
+        text: item.text ?? "",
+        detail: "Пишет ответ",
+      };
+    } else if (item?.type === "commandExecution") {
+      state.liveResponse = {
+        mode: "working",
+        itemId: item.id ?? null,
+        text: "",
+        detail: "Выполняет команду",
+      };
+    } else if (item?.type === "fileChange") {
+      state.liveResponse = {
+        mode: "working",
+        itemId: item.id ?? null,
+        text: "",
+        detail: "Применяет изменения",
+      };
+    }
+    return;
+  }
+  if (
+    event.type === "codex.item.completed"
+    && (!state.liveResponse || state.liveResponse.itemId === event.payload?.item?.id)
+  ) {
+    state.liveResponse = null;
+    return;
+  }
+  if (
+    event.type === "codex.turn.completed"
+    || event.type === "turn.interrupted"
+    || event.type === "session.error"
+  ) {
+    state.liveResponse = null;
+    setLocalSessionStatus(event.type === "session.error" ? "error" : "ready");
+  }
+}
+
+function renderLiveResponse(container = $("#events")) {
+  const existing = container.querySelector(".live-response");
+  if (!state.liveResponse) {
+    existing?.remove();
+    container.setAttribute("aria-busy", "false");
+    return;
+  }
+
+  container.setAttribute("aria-busy", "true");
+  const shouldScroll = isNearBottom(container);
+  const element = existing ?? document.createElement("article");
+  element.className = `message agent live-response ${state.liveResponse.mode}`;
+  element.innerHTML = `
+    <div class="avatar live-avatar">
+      <span class="avatar-pulse"></span>
+      <span class="avatar-text">CX</span>
+    </div>
+    <div class="message-content">
+      <div class="message-label live-label">
+        <span>Codex</span>
+        <span class="live-state">${escapeHtml(state.liveResponse.detail)}</span>
+      </div>
+      <div class="bubble live-bubble">
+        ${state.liveResponse.text
+          ? renderAgentMessage(state.liveResponse.text)
+          : '<span class="typing-dots"><i></i><i></i><i></i></span>'}
+        <span class="stream-caret" aria-hidden="true"></span>
+      </div>
+    </div>
+  `;
+  if (!existing) container.append(element);
+  if (shouldScroll) {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+}
+
+function scheduleLiveRender() {
+  if (state.liveRenderFrame) return;
+  state.liveRenderFrame = requestAnimationFrame(() => {
+    state.liveRenderFrame = null;
+    renderLiveResponse();
+  });
+}
+
+function isLiveEvent(event) {
+  return [
+    "codex.turn.started",
+    "codex.item.started",
+    "codex.item.agentMessage.delta",
+    "codex.turn.completed",
+    "turn.interrupted",
+    "session.error",
+  ].includes(event.type);
+}
+
+function isAgentMessage(item) {
+  return item?.type === "agentMessage" || item?.type === "agent_message";
+}
+
+function isNearBottom(container) {
+  return container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+}
+
+function setLocalSessionStatus(status) {
+  if (!state.selectedSession) return;
+  state.selectedSession = { ...state.selectedSession, status };
+  renderSessionMeta(state.selectedSession);
 }
 
 function visibleEvents(events) {
@@ -417,7 +699,10 @@ function visibleEvents(events) {
     if (event.type !== "codex.item.completed") return false;
 
     const itemType = event.payload?.item?.type;
-    return ["agent_message", "command_execution", "file_change", "error"].includes(itemType);
+    return [
+      "agent_message", "command_execution", "file_change", "error",
+      "agentMessage", "commandExecution", "fileChange",
+    ].includes(itemType);
   });
 }
 
@@ -447,6 +732,23 @@ function appendEvent(event, container) {
     const element = document.createElement("div");
     element.className = "technical-event";
     element.innerHTML = `<strong>${escapeHtml(view.label)}</strong>${escapeHtml(view.body)}`;
+    container.append(element);
+    return;
+  }
+
+  if (view.kind === "approval") {
+    const element = document.createElement("article");
+    element.className = "approval-card";
+    element.dataset.approvalId = view.approvalId;
+    element.innerHTML = `
+      <strong>${escapeHtml(view.label)}</strong>
+      ${view.body ? `<pre>${escapeHtml(view.body)}</pre>` : ""}
+      <div class="approval-actions">
+        <button type="button" data-approval-decision="decline">Отклонить</button>
+        <button type="button" data-approval-decision="acceptForSession">Для сессии</button>
+        <button type="button" data-approval-decision="accept">Разрешить</button>
+      </div>
+    `;
     container.append(element);
     return;
   }
@@ -494,22 +796,36 @@ function formatVisibleEvent(event) {
       className: "",
     };
   }
+  if (type === "approval.requested") {
+    const approvalId = payload.approvalId;
+    const command = payload.command;
+    const reason = payload.reason;
+    return {
+      kind: "approval",
+      approvalId,
+      label: payload.method?.includes("fileChange")
+        ? "Codex запрашивает изменение файлов"
+        : "Codex запрашивает выполнение команды",
+      body: [command, reason].filter(Boolean).join("\n"),
+      className: "approval",
+    };
+  }
 
   const item = payload?.item;
-  if (item?.type === "agent_message") {
+  if (item?.type === "agent_message" || item?.type === "agentMessage") {
     return { kind: "message", label: "Codex", body: item.text, className: "agent" };
   }
-  if (item?.type === "command_execution") {
+  if (item?.type === "command_execution" || item?.type === "commandExecution") {
     return {
       kind: "activity",
       label: item.status === "failed" ? "Команда завершилась с ошибкой" : "Команда",
       summary: `$ ${item.command}`,
-      body: item.aggregated_output?.trim() ?? "",
+      body: (item.aggregated_output ?? item.aggregatedOutput)?.trim() ?? "",
       className: item.status === "failed" ? "error" : "",
       collapsible: true,
     };
   }
-  if (item?.type === "file_change") {
+  if (item?.type === "file_change" || item?.type === "fileChange") {
     return {
       kind: "activity",
       label: "Изменения файлов",
@@ -610,6 +926,29 @@ function highlightCode(code, language) {
 }
 
 $("#events").addEventListener("click", async (event) => {
+  const historyButton = event.target.closest("#load-older");
+  if (historyButton) {
+    await loadOlderEvents(historyButton);
+    return;
+  }
+
+  const approvalButton = event.target.closest("[data-approval-decision]");
+  if (approvalButton) {
+    const card = approvalButton.closest("[data-approval-id]");
+    if (!card || !state.sessionId) return;
+    approvalButton.disabled = true;
+    try {
+      await api(`/api/sessions/${state.sessionId}/approvals/${card.dataset.approvalId}`, {
+        method: "POST",
+        body: JSON.stringify({ decision: approvalButton.dataset.approvalDecision }),
+      });
+    } catch (error) {
+      approvalButton.disabled = false;
+      alert(error.message);
+    }
+    return;
+  }
+
   const button = event.target.closest(".copy-code");
   if (!button) return;
   const code = button.closest(".code-block")?.querySelector("code")?.textContent;
@@ -622,11 +961,68 @@ $("#events").addEventListener("click", async (event) => {
   }, 1200);
 });
 
+async function loadOlderEvents(button) {
+  if (!state.sessionId || !state.firstSequence) return;
+  button.disabled = true;
+  try {
+    const container = $("#events");
+    const previousHeight = container.scrollHeight;
+    const { events, hasMore } = await api(
+      `/api/sessions/${state.sessionId}/events/history`
+      + `?before=${state.firstSequence}&limit=200`,
+    );
+    if (events.length) {
+      state.events = [...events, ...state.events];
+      state.firstSequence = events[0].sequence;
+    }
+    state.hasMoreEvents = hasMore;
+    renderEvents(false);
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight - previousHeight;
+    });
+  } catch (error) {
+    button.disabled = false;
+    alert(error.message);
+  }
+}
+
 async function refreshSelectedSession() {
   if (!state.sessionId) return;
   const { session } = await api(`/api/sessions/${state.sessionId}`);
   renderSessionMeta(session);
   await loadSessions();
+}
+
+function scheduleSessionRefresh() {
+  clearTimeout(state.sessionRefreshTimer);
+  state.sessionRefreshTimer = setTimeout(() => void refreshSelectedSession(), 150);
+}
+
+function isSessionStateEvent(event) {
+  return [
+    "session.ready",
+    "session.error",
+    "session.stopped",
+    "session.resumed",
+    "session.settings",
+    "turn.interrupted",
+    "codex.turn.started",
+    "codex.turn.completed",
+  ].includes(event.type);
+}
+
+function updateApprovalState(event) {
+  if (event.type === "approval.requested") {
+    const id = String(event.payload.approvalId);
+    state.approvals[id] = {
+      id,
+      method: event.payload.method,
+      payload: event.payload,
+    };
+  }
+  if (event.type === "approval.resolved") {
+    delete state.approvals[String(event.payload.approvalId)];
+  }
 }
 
 $("#project").addEventListener("change", async () => {
@@ -635,10 +1031,41 @@ $("#project").addEventListener("change", async () => {
   state.sessionId = null;
   state.events = [];
   state.lastSequence = 0;
+  state.firstSequence = 0;
+  state.hasMoreEvents = false;
+  state.approvals = {};
+  state.liveResponse = null;
+  state.selectedSession = null;
   promptInput.value = "";
   resizePrompt();
   await loadSessions();
   renderEvents();
+});
+
+$("#sandbox-mode").addEventListener("change", async (event) => {
+  if (!state.sessionId) return;
+  const select = event.target;
+  if (
+    select.value === "danger-full-access"
+    && !confirm("Полный доступ снимает ограничения файловой системы и отключает approvals. Продолжить?")
+  ) {
+    const { session } = await api(`/api/sessions/${state.sessionId}`);
+    renderSessionMeta(session);
+    return;
+  }
+  select.disabled = true;
+  try {
+    const { session } = await api(`/api/sessions/${state.sessionId}/settings`, {
+      method: "POST",
+      body: JSON.stringify({ sandboxMode: select.value }),
+    });
+    renderSessionMeta(session);
+    await loadSessions();
+  } catch (error) {
+    alert(error.message);
+    const { session } = await api(`/api/sessions/${state.sessionId}`);
+    renderSessionMeta(session);
+  }
 });
 
 const createProjectModal = $("#create-project-modal");

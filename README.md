@@ -1,15 +1,20 @@
 # Ronix Agent
 
-Минимальная серверная прослойка над Codex для долгоживущих проектных сессий.
+Серверная прослойка над Codex app-server для долгоживущих проектных сессий.
 
 Сейчас реализовано:
 
 - регистрация локальных проектов из разрешённых директорий;
 - создание проектных сессий;
 - сохранение `threadId` в SQLite;
-- продолжение диалога через `Codex.resumeThread()`;
+- один долгоживущий процесс `codex app-server`;
+- продолжение диалога через `thread/resume`;
 - поток структурированных событий через SSE;
 - прерывание активного turn;
+- безопасный `workspace-write` по умолчанию и переключение режима доступа;
+- подтверждение команд и изменений файлов в web-интерфейсе;
+- восстановление сессий после перезапуска процесса;
+- пагинация истории и ограничение размера журнала событий;
 - адаптивный web-клиент с мобильным меню;
 - вход по 32-байтному ключу через защищённую cookie;
 - просмотр лимитов и статистики использования Codex.
@@ -39,6 +44,10 @@ PORT=8787
 DATA_DIR=./data
 PROJECT_ROOTS=/home/ronix/Projects/RONIX,/another/allowed/root
 CODEX_PATH=/usr/bin/codex
+TRUST_PROXY=false
+EVENT_HISTORY_LIMIT=200
+EVENT_RETENTION=5000
+SHUTDOWN_TIMEOUT_MS=10000
 ```
 
 В production-примере ниже используется отдельный каталог
@@ -77,6 +86,15 @@ Nginx). Сам backend безопаснее оставить на `127.0.0.1:878
 
 Для API-скриптов ключ также можно передавать как `Authorization: Bearer <ключ>`.
 Старое имя переменной `AGENT_TOKEN` пока поддерживается как совместимый alias.
+
+При работе через Caddy или Nginx установите `TRUST_PROXY=true`. Тогда Ronix
+использует переданные прокси `X-Forwarded-For` и `X-Forwarded-Proto`. Без этой
+настройки эти заголовки игнорируются, чтобы клиент не мог подменить IP для обхода
+ограничения попыток входа.
+
+Изменяющие cookie-auth запросы проверяют `Origin`. Ronix также отправляет CSP,
+`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` и запрет
+встраивания во frame.
 
 ## Публикация через HTTPS
 
@@ -137,9 +155,11 @@ Environment=PORT=8787
 Environment=DATA_DIR=/var/lib/ronix-agent
 Environment=PROJECT_ROOTS=/srv/ronix-projects
 Environment=CODEX_PATH=/usr/bin/codex
+Environment=TRUST_PROXY=true
 ExecStart=/usr/bin/node dist/src/server.js
 Restart=always
 RestartSec=3
+TimeoutStopSec=15
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
@@ -182,10 +202,23 @@ sudo systemctl restart ronix-agent
 не останавливал процесс в фоне, может потребоваться `termux-wake-lock` и
 отключение оптимизации батареи для Termux.
 
-Backend автоматически ищет `codex` в `PATH` и передаёт его SDK через
-`codexPathOverride`. Это важно: bundled-бинарник SDK может быть старее
-установленного CLI и не поддерживать текущую модель. `CODEX_PATH` позволяет
-явно закрепить нужный бинарник.
+Backend автоматически ищет `codex` в `PATH` и запускает
+`codex app-server`. `CODEX_PATH` позволяет явно закрепить нужный бинарник.
+Ronix держит один app-server-процесс вместо запуска отдельного процесса для
+каждого turn или запроса лимитов.
+
+## Режимы доступа
+
+Каждая сессия хранит собственный режим:
+
+- `read-only` — чтение проекта без записи;
+- `workspace-write` — режим по умолчанию, запись только в проект и разрешённые
+  Codex writable roots;
+- `danger-full-access` — полный доступ пользователя, запустившего Ronix.
+
+В `read-only` и `workspace-write` используется `approvalPolicy: on-request`.
+Запросы на выполнение команды или изменение файлов показываются в web-клиенте.
+Полный доступ выбирается явно и работает без дополнительных approvals.
 
 ## API
 
@@ -202,19 +235,25 @@ POST /api/sessions
 GET  /api/sessions/:id
 DELETE /api/sessions/:id
 GET  /api/sessions/:id/events
+GET  /api/sessions/:id/events/history
 POST /api/sessions/:id/turns
 POST /api/sessions/:id/interrupt
 POST /api/sessions/:id/stop
 POST /api/sessions/:id/resume
+POST /api/sessions/:id/settings
+POST /api/sessions/:id/approvals/:approvalId
 ```
 
-## Ограничения MVP
+## Состояние и восстановление
 
 - Сессия работает прямо в директории проекта; отдельные Git worktree ещё не создаются.
-- TypeScript SDK не предоставляет интерактивный approval-протокол, поэтому
-  turns запускаются с `approvalPolicy: "never"` и `danger-full-access`. Codex имеет
-  запись в `.git`, сетевой доступ и права пользователя, запустившего Ronix.
-  Публикуйте интерфейс только через HTTPS и обязательно включайте `AGENT_KEY`.
-- Для approvals, fork и управления одним общим daemon следующий этап должен
-  перейти на `codex app-server`.
+- При штатном завершении Ronix прерывает активные turns перед остановкой
+  app-server. Если процесс был убит аварийно, оставшиеся `running`-сессии при
+  следующем запуске переводятся в `error`; сохранённый `threadId` остаётся и
+  следующий turn продолжает тот же Codex thread.
+- `EVENT_HISTORY_LIMIT` задаёт размер начальной страницы истории.
+  `EVENT_RETENTION` ограничивает количество сохранённых UI-событий на сессию.
+- Ожидающие approval-запросы относятся к живому app-server-соединению и после
+  аварийного рестарта отменяются.
 - Backend рассчитан на одного доверенного пользователя.
+- Публикуйте интерфейс только через HTTPS и обязательно включайте `AGENT_KEY`.

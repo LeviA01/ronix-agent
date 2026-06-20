@@ -43,6 +43,10 @@ export const config = {
   authKey: process.env.AGENT_KEY ?? process.env.AGENT_TOKEN ?? "",
   authSessionDays: integer(process.env.AUTH_SESSION_DAYS, 30),
   secureAuthCookie: boolean(process.env.AUTH_COOKIE_SECURE, true),
+  trustProxy: boolean(process.env.TRUST_PROXY, false),
+  eventHistoryLimit: integer(process.env.EVENT_HISTORY_LIMIT, 200),
+  eventRetention: integer(process.env.EVENT_RETENTION, 5_000),
+  shutdownTimeoutMs: integer(process.env.SHUTDOWN_TIMEOUT_MS, 10_000),
   projectRoots: (process.env.PROJECT_ROOTS ?? "/home/ronix/Projects/RONIX")
     .split(",")
     .map((path) => resolve(path.trim()))

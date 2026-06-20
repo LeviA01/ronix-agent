@@ -1,135 +1,298 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
-    />
-    <title>Ronix Agent</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <main class="app-shell">
-      <aside id="sidebar" class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">R</div>
-          <div>
-            <h1>Ronix</h1>
-            <p>Codex control</p>
-          </div>
-          <span id="connection" class="connection-dot" title="offline"></span>
-          <button
-            id="close-sidebar"
-            class="mobile-sidebar-button close-sidebar"
-            type="button"
-            aria-label="Закрыть меню"
-          >×</button>
-        </div>
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+        />
+        <title>Ronix Agent</title>
+        <link rel="stylesheet" href="/styles.css" />
+    </head>
+    <body>
+        <main class="app-shell">
+            <aside id="sidebar" class="sidebar">
+                <div class="brand">
+                    <div class="brand-mark">R</div>
+                    <div>
+                        <h1>Ronix</h1>
+                        <p>Codex control</p>
+                    </div>
+                    <span
+                        id="connection"
+                        class="connection-dot"
+                        title="offline"
+                    ></span>
+                    <button
+                        id="close-sidebar"
+                        class="mobile-sidebar-button close-sidebar"
+                        type="button"
+                        aria-label="Закрыть меню"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M6 6l12 12M18 6 6 18"></path>
+                        </svg>
+                    </button>
+                </div>
 
-        <div class="project-picker">
-          <label for="project">Проект</label>
-          <div class="project-row">
-            <select id="project"></select>
-            <button id="new-session" class="icon-button" title="Новая сессия" aria-label="Новая сессия">+</button>
-          </div>
-        </div>
+                <div class="project-picker">
+                    <label for="project">Проект</label>
+                    <div class="project-row">
+                        <select id="project"></select>
+                        <button
+                            id="new-session"
+                            class="icon-button"
+                            title="Новая сессия"
+                            aria-label="Новая сессия"
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 5v14M5 12h14"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
 
-        <div class="sessions-head">
-          <span>Сессии</span>
-          <span id="session-count" class="count">0</span>
-        </div>
-        <div id="sessions" class="session-list"></div>
+                <div class="sessions-head">
+                    <span>Сессии</span>
+                    <span id="session-count" class="count">0</span>
+                </div>
+                <div id="sessions" class="session-list"></div>
 
-        <details class="add-project">
-          <summary>Добавить проект</summary>
-          <form id="project-form">
-            <label for="project-folder">Папка в каталоге проектов</label>
-            <div id="project-root-hint" class="project-root-hint"></div>
-            <input id="project-folder" placeholder="veyra" autocomplete="off" required />
-            <button type="submit">Добавить</button>
-          </form>
-        </details>
+                <details class="add-project">
+                    <summary>Добавить проект</summary>
+                    <form id="project-form">
+                        <label for="project-folder"
+                            >Папка в каталоге проектов</label
+                        >
+                        <div
+                            id="project-root-hint"
+                            class="project-root-hint"
+                        ></div>
+                        <input
+                            id="project-folder"
+                            placeholder="veyra"
+                            autocomplete="off"
+                            required
+                        />
+                        <button type="submit">Добавить</button>
+                    </form>
+                </details>
 
-        <button id="show-limits" class="limits-button" type="button">
-          <span>Лимиты Codex</span>
-          <span id="limits-summary">Проверить</span>
-        </button>
-        <button id="logout" class="logout-button" type="button" hidden>Выйти</button>
-      </aside>
+                <button id="show-limits" class="limits-button" type="button">
+                    <span>Лимиты Codex</span>
+                    <span id="limits-summary">Проверить</span>
+                </button>
+                <button id="logout" class="logout-button" type="button" hidden>
+                    Выйти
+                </button>
+            </aside>
 
-      <section class="chat">
-        <header class="chat-head">
-          <button
-            id="open-sidebar"
-            class="mobile-sidebar-button open-sidebar"
-            type="button"
-            aria-label="Открыть проекты и сессии"
-            aria-controls="sidebar"
-            aria-expanded="false"
-          >
-            <span></span><span></span><span></span>
-          </button>
-          <div class="chat-title">
-            <h2 id="session-title">Выберите сессию</h2>
-            <p id="session-meta">Создайте сессию, чтобы начать работу</p>
-          </div>
-          <div class="chat-actions">
-            <label class="debug-toggle" title="Показывать сырые события Codex">
-              <input id="show-technical" type="checkbox" />
-              <span>Технические</span>
-            </label>
-            <button id="interrupt" class="interrupt-button" disabled>Стоп</button>
-          </div>
-        </header>
+            <section class="chat">
+                <header class="chat-head">
+                    <button
+                        id="open-sidebar"
+                        class="mobile-sidebar-button open-sidebar"
+                        type="button"
+                        aria-label="Открыть проекты и сессии"
+                        aria-controls="sidebar"
+                        aria-expanded="false"
+                    >
+                        <span></span><span></span><span></span>
+                    </button>
+                    <div class="chat-title">
+                        <h2 id="session-title">Выберите сессию</h2>
+                        <div id="session-meta" class="session-meta">
+                            <span class="session-meta-dot"></span>
+                            <span>Создайте сессию, чтобы начать работу</span>
+                        </div>
+                    </div>
+                    <div class="chat-actions">
+                        <label
+                            class="access-mode"
+                            title="Права Codex для этой сессии"
+                            hidden
+                        >
+                            <span>Доступ</span>
+                            <select id="sandbox-mode" disabled>
+                                <option value="read-only">Только чтение</option>
+                                <option value="workspace-write">Проект</option>
+                                <option value="danger-full-access">
+                                    Полный
+                                </option>
+                            </select>
+                        </label>
+                        <label
+                            class="debug-toggle"
+                            title="Показывать сырые события Codex"
+                        >
+                            <input id="show-technical" type="checkbox" />
+                            <span>Технические</span>
+                        </label>
+                        <button
+                            id="interrupt"
+                            class="interrupt-button"
+                            disabled
+                            hidden
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect
+                                    x="7"
+                                    y="7"
+                                    width="10"
+                                    height="10"
+                                    rx="2"
+                                ></rect>
+                            </svg>
+                            <span>Стоп</span>
+                        </button>
+                    </div>
+                </header>
 
-        <div id="events" class="events">
-          <div class="empty-state">
-            <div class="empty-icon">›_</div>
-            <h3>Codex готов к работе</h3>
-            <p>Выберите или создайте сессию проекта.</p>
-          </div>
-        </div>
+                <div
+                    id="events"
+                    class="events"
+                    role="log"
+                    aria-live="polite"
+                    aria-relevant="additions text"
+                >
+                    <div class="empty-state">
+                        <div class="empty-icon">›_</div>
+                        <h3>Codex готов к работе</h3>
+                        <p>Выберите или создайте сессию проекта.</p>
+                    </div>
+                </div>
 
-        <form id="prompt-form" class="composer">
-          <textarea id="prompt" rows="1" placeholder="Напишите задачу для Codex…" required></textarea>
-          <button id="send" type="submit" disabled aria-label="Отправить">
-            <span>↑</span>
-          </button>
-        </form>
-      </section>
-      <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Закрыть меню"></button>
+                <form id="prompt-form" class="composer">
+                    <textarea
+                        id="prompt"
+                        rows="1"
+                        placeholder="Напишите задачу для Codex…"
+                        required
+                    ></textarea>
+                    <button
+                        id="send"
+                        type="submit"
+                        disabled
+                        aria-label="Отправить"
+                    >
+                        <svg
+                            width="800px"
+                            height="800px"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M18.8951 3.61502C19.7248 3.37794 20.492 4.1451 20.2549 4.97489L16.2553 18.9736C15.8267 20.4736 13.823 20.7554 12.9973 19.4317L10.1999 14.947C9.87715 14.4296 9.44039 13.9928 8.92298 13.6701L4.43823 10.8726C3.11455 10.047 3.39632 8.04323 4.89636 7.61465L18.8951 3.61502Z"
+                                stroke="#000000"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <path
+                                d="M10.1924 13.6777L13.7279 10.1422"
+                                stroke="#000000"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </button>
+                </form>
+            </section>
+            <button
+                id="sidebar-backdrop"
+                class="sidebar-backdrop"
+                type="button"
+                aria-label="Закрыть меню"
+            ></button>
 
-      <div id="create-project-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="create-project-title" hidden>
-        <button class="confirm-backdrop" type="button" data-cancel-project aria-label="Отменить"></button>
-        <section class="confirm-panel">
-          <h2 id="create-project-title">Проект не найден</h2>
-          <p>Папка <strong id="create-project-path"></strong> не существует.</p>
-          <p>Создать её и инициализировать новый Git-проект?</p>
-          <div class="confirm-actions">
-            <button type="button" class="confirm-cancel" data-cancel-project>Отмена</button>
-            <button id="confirm-create-project" type="button" class="confirm-create">Создать проект</button>
-          </div>
-        </section>
-      </div>
-
-      <div id="limits-modal" class="limits-modal" role="dialog" aria-modal="true" aria-labelledby="limits-title" hidden>
-        <button class="limits-backdrop" type="button" data-close-limits aria-label="Закрыть лимиты"></button>
-        <section class="limits-panel">
-          <header class="limits-head">
-            <div>
-              <h2 id="limits-title">Лимиты Codex</h2>
-              <p id="limits-account">Загрузка данных аккаунта…</p>
+            <div
+                id="create-project-modal"
+                class="confirm-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="create-project-title"
+                hidden
+            >
+                <button
+                    class="confirm-backdrop"
+                    type="button"
+                    data-cancel-project
+                    aria-label="Отменить"
+                ></button>
+                <section class="confirm-panel">
+                    <h2 id="create-project-title">Проект не найден</h2>
+                    <p>
+                        Папка <strong id="create-project-path"></strong> не
+                        существует.
+                    </p>
+                    <p>Создать её и инициализировать новый Git-проект?</p>
+                    <div class="confirm-actions">
+                        <button
+                            type="button"
+                            class="confirm-cancel"
+                            data-cancel-project
+                        >
+                            Отмена
+                        </button>
+                        <button
+                            id="confirm-create-project"
+                            type="button"
+                            class="confirm-create"
+                        >
+                            Создать проект
+                        </button>
+                    </div>
+                </section>
             </div>
-            <button class="limits-close" type="button" data-close-limits aria-label="Закрыть">×</button>
-          </header>
-          <div id="limits-content" class="limits-content">
-            <div class="limits-loading">Получаем данные из Codex…</div>
-          </div>
-          <button id="refresh-limits" class="refresh-limits" type="button">Обновить</button>
-        </section>
-      </div>
-    </main>
-    <script type="module" src="/app.js"></script>
-  </body>
+
+            <div
+                id="limits-modal"
+                class="limits-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="limits-title"
+                hidden
+            >
+                <button
+                    class="limits-backdrop"
+                    type="button"
+                    data-close-limits
+                    aria-label="Закрыть лимиты"
+                ></button>
+                <section class="limits-panel">
+                    <header class="limits-head">
+                        <div>
+                            <h2 id="limits-title">Лимиты Codex</h2>
+                            <p id="limits-account">Загрузка данных аккаунта…</p>
+                        </div>
+                        <button
+                            class="limits-close"
+                            type="button"
+                            data-close-limits
+                            aria-label="Закрыть"
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6 6 18"></path>
+                            </svg>
+                        </button>
+                    </header>
+                    <div id="limits-content" class="limits-content">
+                        <div class="limits-loading">
+                            Получаем данные из Codex…
+                        </div>
+                    </div>
+                    <button
+                        id="refresh-limits"
+                        class="refresh-limits"
+                        type="button"
+                    >
+                        Обновить
+                    </button>
+                </section>
+            </div>
+        </main>
+        <script type="module" src="/app.js"></script>
+    </body>
 </html>

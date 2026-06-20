@@ -47,6 +47,7 @@ export class AuthManager {
     if (!this.enabled) return { ok: true };
 
     const now = Date.now();
+    this.deleteExpiredAttempts(now);
     const attempts = this.attempts.get(clientId);
     if (attempts && attempts.resetsAt > now && attempts.count >= MAX_ATTEMPTS) {
       return {
@@ -83,6 +84,12 @@ export class AuthManager {
   private deleteExpiredSessions(now: number): void {
     for (const [token, session] of this.sessions) {
       if (session.expiresAt <= now) this.sessions.delete(token);
+    }
+  }
+
+  private deleteExpiredAttempts(now: number): void {
+    for (const [clientId, attempts] of this.attempts) {
+      if (attempts.resetsAt <= now) this.attempts.delete(clientId);
     }
   }
 }
