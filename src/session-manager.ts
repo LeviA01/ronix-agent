@@ -56,7 +56,7 @@ export class SessionManager {
 
     const options: ThreadOptions = {
       workingDirectory: project.path,
-      sandboxMode: "workspace-write",
+      sandboxMode: "danger-full-access",
       approvalPolicy: "never",
       skipGitRepoCheck: false,
     };

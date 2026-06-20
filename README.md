@@ -212,7 +212,9 @@ POST /api/sessions/:id/resume
 
 - Сессия работает прямо в директории проекта; отдельные Git worktree ещё не создаются.
 - TypeScript SDK не предоставляет интерактивный approval-протокол, поэтому
-  turns запускаются с `approvalPolicy: "never"` и `workspace-write`.
+  turns запускаются с `approvalPolicy: "never"` и `danger-full-access`. Codex имеет
+  запись в `.git`, сетевой доступ и права пользователя, запустившего Ronix.
+  Публикуйте интерфейс только через HTTPS и обязательно включайте `AGENT_KEY`.
 - Для approvals, fork и управления одним общим daemon следующий этап должен
   перейти на `codex app-server`.
 - Backend рассчитан на одного доверенного пользователя.
