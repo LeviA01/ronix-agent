@@ -21,6 +21,7 @@ const state = {
   events: [],
   approvals: {},
   sessionRefreshTimer: null,
+  liveTurnActive: false,
   liveResponse: null,
   liveRenderFrame: null,
   selectedSession: null,
@@ -330,6 +331,7 @@ async function selectSession(id) {
   state.hasMoreEvents = false;
   state.events = [];
   state.approvals = {};
+  state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
   renderEvents();
@@ -376,6 +378,8 @@ async function deleteSession(id) {
       state.firstSequence = 0;
       state.hasMoreEvents = false;
       state.approvals = {};
+      state.liveTurnActive = false;
+      state.liveResponse = null;
       promptInput.value = "";
       resizePrompt();
       $("#session-title").textContent = "Выберите сессию";
@@ -530,10 +534,13 @@ function appendVisibleEvent(event) {
   container.querySelector(".empty-state")?.remove();
   const visible = state.showTechnical || visibleEvents([event]).length > 0;
   const shouldScroll = isNearBottom(container);
-  if (event.type === "codex.item.completed" && isAgentMessage(event.payload?.item)) {
+  if (event.type === "codex.item.completed") {
     container.querySelector(".live-response")?.remove();
   }
   if (visible) appendEvent(event, container);
+  if (event.type === "codex.item.completed") {
+    renderLiveResponse(container);
+  }
   if (shouldScroll) {
     requestAnimationFrame(() => {
       container.scrollTop = container.scrollHeight;
@@ -563,6 +570,7 @@ function renderPendingApprovals(container) {
 
 function updateLiveResponse(event) {
   if (event.type === "codex.turn.started") {
+    state.liveTurnActive = true;
     state.liveResponse = { mode: "thinking", itemId: null, text: "", detail: "Анализирует задачу" };
     setLocalSessionStatus("running");
     return;
@@ -586,14 +594,14 @@ function updateLiveResponse(event) {
         text: item.text ?? "",
         detail: "Пишет ответ",
       };
-    } else if (item?.type === "commandExecution") {
+    } else if (isCommandItem(item)) {
       state.liveResponse = {
         mode: "working",
         itemId: item.id ?? null,
         text: "",
         detail: "Выполняет команду",
       };
-    } else if (item?.type === "fileChange") {
+    } else if (isFileChangeItem(item)) {
       state.liveResponse = {
         mode: "working",
         itemId: item.id ?? null,
@@ -603,11 +611,12 @@ function updateLiveResponse(event) {
     }
     return;
   }
-  if (
-    event.type === "codex.item.completed"
-    && (!state.liveResponse || state.liveResponse.itemId === event.payload?.item?.id)
-  ) {
-    state.liveResponse = null;
+  if (event.type === "codex.item.completed") {
+    const item = event.payload?.item;
+    const matchesLiveItem = !state.liveResponse || state.liveResponse.itemId === item?.id;
+    state.liveResponse = state.liveTurnActive && isToolItem(item)
+      ? { mode: "thinking", itemId: null, text: "", detail: "Анализирует результат" }
+      : matchesLiveItem || isAgentMessage(item) ? null : state.liveResponse;
     return;
   }
   if (
@@ -615,6 +624,7 @@ function updateLiveResponse(event) {
     || event.type === "turn.interrupted"
     || event.type === "session.error"
   ) {
+    state.liveTurnActive = false;
     state.liveResponse = null;
     setLocalSessionStatus(event.type === "session.error" ? "error" : "ready");
   }
@@ -679,6 +689,24 @@ function isLiveEvent(event) {
 
 function isAgentMessage(item) {
   return item?.type === "agentMessage" || item?.type === "agent_message";
+}
+
+function isToolItem(item) {
+  return isCommandItem(item) || isFileChangeItem(item);
+}
+
+function isCommandItem(item) {
+  return [
+    "commandExecution",
+    "command_execution",
+  ].includes(item?.type);
+}
+
+function isFileChangeItem(item) {
+  return [
+    "fileChange",
+    "file_change",
+  ].includes(item?.type);
 }
 
 function isNearBottom(container) {
@@ -1034,6 +1062,7 @@ $("#project").addEventListener("change", async () => {
   state.firstSequence = 0;
   state.hasMoreEvents = false;
   state.approvals = {};
+  state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
   promptInput.value = "";
