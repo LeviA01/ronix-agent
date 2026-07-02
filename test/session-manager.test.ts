@@ -88,6 +88,38 @@ test("records the user message before reporting a start failure", async () => {
   }
 });
 
+test("passes the selected model and reasoning effort to Codex", async () => {
+  const testFixture = fixture();
+  try {
+    const session = testFixture.manager.createSession("p1", {
+      model: "gpt-5.5",
+      reasoningEffort: "xhigh",
+    });
+    await testFixture.manager.startTurn(session.id, "Solve a difficult problem");
+    assert.deepEqual(testFixture.codex.calls[0], {
+      method: "thread/start",
+      params: {
+        cwd: testFixture.directory,
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        model: "gpt-5.5",
+      },
+    });
+    assert.deepEqual(testFixture.codex.calls[1], {
+      method: "turn/start",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Solve a difficult problem" }],
+        model: "gpt-5.5",
+        effort: "xhigh",
+      },
+    });
+  } finally {
+    testFixture.close();
+  }
+});
+
 test("routes approval requests and sends the selected decision", async () => {
   const testFixture = fixture();
   try {

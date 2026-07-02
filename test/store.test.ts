@@ -20,6 +20,8 @@ test("persists projects, sessions, and ordered events", () => {
       activeTurnId: null,
       status: "ready",
       sandboxMode: "workspace-write",
+      model: null,
+      reasoningEffort: null,
       lastError: null,
       createdAt: now,
       lastActivityAt: now,
@@ -28,9 +30,15 @@ test("persists projects, sessions, and ordered events", () => {
     const first = store.addEvent("s1", "user.message", { text: "hello" });
     const second = store.addEvent("s1", "codex.turn.started", {});
     store.updateSession("s1", { threadId: "thread-1", status: "running" });
+    store.updateSession("s1", {
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+    });
 
     assert.equal(store.getProject("p1")?.name, "Test");
     assert.equal(store.getSession("s1")?.threadId, "thread-1");
+    assert.equal(store.getSession("s1")?.model, "gpt-5.5");
+    assert.equal(store.getSession("s1")?.reasoningEffort, "high");
     assert.deepEqual(
       store.listEvents("s1", first.sequence).map((event) => event.sequence),
       [second.sequence],
@@ -69,6 +77,8 @@ test("recovers sessions left running after a process restart", () => {
       activeTurnId: "turn-1",
       status: "running",
       sandboxMode: "workspace-write",
+      model: null,
+      reasoningEffort: null,
       lastError: null,
       createdAt: now,
       lastActivityAt: now,
@@ -123,6 +133,8 @@ test("migrates sessions created by version 0.1", () => {
     const session = store.getSession("s1");
     assert.equal(session?.activeTurnId, null);
     assert.equal(session?.sandboxMode, "workspace-write");
+    assert.equal(session?.model, null);
+    assert.equal(session?.reasoningEffort, null);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

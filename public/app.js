@@ -1,15 +1,17 @@
-function loadDrafts() {
+function loadStoredJson(key, fallback) {
   try {
-    const value = JSON.parse(localStorage.getItem("ronix-agent-drafts") ?? "{}");
-    return value && typeof value === "object" ? value : {};
+    const value = JSON.parse(localStorage.getItem(key) ?? "null");
+    return value && typeof value === "object" ? value : fallback;
   } catch {
-    return {};
+    return fallback;
   }
 }
 
 const state = {
   projects: [],
   projectRoots: [],
+  models: [],
+  modelError: null,
   pendingProject: null,
   sessions: [],
   sessionId: null,
@@ -26,30 +28,57 @@ const state = {
   liveRenderFrame: null,
   selectedSession: null,
   showTechnical: localStorage.getItem("ronix-agent-technical") === "true",
-  drafts: loadDrafts(),
+  drafts: loadStoredJson("ronix-agent-drafts", {}),
+  navigation: loadStoredJson("ronix-agent-navigation", {
+    projectId: null,
+    sessionsByProject: {},
+  }),
+  modelPreference: loadStoredJson("ronix-agent-model-preference", {}),
 };
 
 const $ = (selector) => document.querySelector(selector);
 const appShell = $(".app-shell");
+const chat = $(".chat");
+
+if (
+  !state.navigation.sessionsByProject
+  || typeof state.navigation.sessionsByProject !== "object"
+  || Array.isArray(state.navigation.sessionsByProject)
+) {
+  state.navigation.sessionsByProject = {};
+}
 
 function setSidebarOpen(open) {
+  if (open) setSettingsOpen(false);
   appShell.classList.toggle("sidebar-open", open);
   $("#open-sidebar").setAttribute("aria-expanded", String(open));
   if (open) $("#project").focus({ preventScroll: true });
 }
 
+function setSettingsOpen(open) {
+  chat.classList.toggle("settings-open", open);
+  $("#toggle-settings").setAttribute("aria-expanded", String(open));
+}
+
 $("#open-sidebar").addEventListener("click", () => setSidebarOpen(true));
 $("#close-sidebar").addEventListener("click", () => setSidebarOpen(false));
 $("#sidebar-backdrop").addEventListener("click", () => setSidebarOpen(false));
+$("#toggle-settings").addEventListener("click", () => {
+  setSettingsOpen(!chat.classList.contains("settings-open"));
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setSidebarOpen(false);
+    setSettingsOpen(false);
     closeLimits();
     closeCreateProject();
   }
 });
 window.matchMedia("(min-width: 761px)").addEventListener("change", (event) => {
-  if (event.matches) setSidebarOpen(false);
+  if (event.matches) {
+    setSidebarOpen(false);
+    setSettingsOpen(false);
+  }
 });
 
 const limitsModal = $("#limits-modal");
@@ -209,7 +238,24 @@ async function loadProjects() {
   $("#project").innerHTML = projects
     .map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
     .join("");
+  const rememberedProject = projects.find(
+    (project) => project.id === state.navigation.projectId,
+  );
+  if (rememberedProject) $("#project").value = rememberedProject.id;
+  rememberProject($("#project").value || null);
   await loadSessions();
+}
+
+async function loadModels() {
+  try {
+    const { models } = await api("/api/codex/models");
+    state.models = models;
+    state.modelError = null;
+  } catch (error) {
+    state.models = [];
+    state.modelError = error.message;
+  }
+  renderModelControls(state.selectedSession);
 }
 
 async function loadSessions() {
@@ -217,14 +263,45 @@ async function loadSessions() {
   if (!projectId) {
     state.sessions = [];
     renderSessions();
+    renderSessionMeta(null);
     return;
   }
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
   state.sessions = sessions;
   renderSessions();
-  if (!state.sessionId && sessions[0]) {
-    await selectSession(sessions[0].id);
+  if (!sessions.some((session) => session.id === state.sessionId)) {
+    state.sessionId = null;
   }
+  if (!state.sessionId) {
+    const rememberedId = state.navigation.sessionsByProject?.[projectId];
+    const preferred = sessions.find((session) => session.id === rememberedId) ?? sessions[0];
+    if (preferred) {
+      await selectSession(preferred.id);
+    } else {
+      forgetSession(projectId);
+      renderSessionMeta(null);
+      renderEvents();
+    }
+  }
+}
+
+function rememberProject(projectId) {
+  state.navigation.projectId = projectId;
+  state.navigation.sessionsByProject ??= {};
+  localStorage.setItem("ronix-agent-navigation", JSON.stringify(state.navigation));
+}
+
+function rememberSession(projectId, sessionId) {
+  state.navigation.projectId = projectId;
+  state.navigation.sessionsByProject ??= {};
+  state.navigation.sessionsByProject[projectId] = sessionId;
+  localStorage.setItem("ronix-agent-navigation", JSON.stringify(state.navigation));
+}
+
+function forgetSession(projectId) {
+  state.navigation.sessionsByProject ??= {};
+  delete state.navigation.sessionsByProject[projectId];
+  localStorage.setItem("ronix-agent-navigation", JSON.stringify(state.navigation));
 }
 
 function renderSessions() {
@@ -321,6 +398,7 @@ document.addEventListener("click", closeSessionMenus);
 
 async function selectSession(id) {
   setSidebarOpen(false);
+  setSettingsOpen(false);
   closeSessionMenus();
   saveCurrentDraft();
   state.source?.close();
@@ -334,13 +412,16 @@ async function selectSession(id) {
   state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
+  const projectId = $("#project").value;
+  if (projectId) rememberSession(projectId, id);
   renderEvents();
   renderSessions();
   const { session, approvals = [] } = await api(`/api/sessions/${id}`);
+  const normalizedSession = await normalizeSessionModel(session);
   for (const approval of approvals) state.approvals[approval.id] = approval;
   renderEvents();
-  state.selectedSession = session;
-  renderSessionMeta(session);
+  state.selectedSession = normalizedSession;
+  renderSessionMeta(normalizedSession);
   restoreDraft(id);
   connectEvents(id, true);
 }
@@ -387,6 +468,7 @@ async function deleteSession(id) {
       $("#send").disabled = true;
       $("#interrupt").disabled = true;
       $("#sandbox-mode").disabled = true;
+      forgetSession(session.projectId);
     }
 
     await loadSessions();
@@ -403,8 +485,12 @@ function renderSessionMeta(session) {
     $("#session-title").textContent = "Выберите сессию";
     meta.className = "session-meta";
     meta.innerHTML = '<span class="session-meta-dot"></span><span>Создайте сессию, чтобы начать работу</span>';
-    document.querySelector(".access-mode").hidden = true;
+    $("#session-settings").hidden = true;
+    $("#toggle-settings").hidden = true;
     $("#interrupt").hidden = true;
+    $("#send").disabled = true;
+    $("#sandbox-mode").disabled = true;
+    renderModelControls(null);
     return;
   }
   $("#session-title").textContent = sessionTitle(session);
@@ -421,8 +507,142 @@ function renderSessionMeta(session) {
   sandbox.value = session.sandboxMode ?? "workspace-write";
   sandbox.disabled = session.status === "running";
   const accessMode = document.querySelector(".access-mode");
-  accessMode.hidden = false;
-  accessMode.className = `access-mode mode-${session.sandboxMode ?? "workspace-write"}`;
+  accessMode.className =
+    `setting-field access-mode mode-${session.sandboxMode ?? "workspace-write"}`;
+  $("#session-settings").hidden = false;
+  $("#toggle-settings").hidden = false;
+  renderModelControls(session);
+}
+
+function currentModel(session = state.selectedSession) {
+  return state.models.find((model) => model.model === session?.model)
+    ?? state.models.find((model) => model.isDefault)
+    ?? state.models[0]
+    ?? null;
+}
+
+async function normalizeSessionModel(session) {
+  if (!session.model || state.models.length === 0 || session.status === "running") {
+    return session;
+  }
+  const model = state.models.find((item) => item.model === session.model);
+  const fallback = model
+    ?? state.models.find((item) => item.isDefault)
+    ?? state.models[0];
+  const hasValidEffort = fallback.supportedReasoningEfforts.some(
+    (option) => option.reasoningEffort === session.reasoningEffort,
+  );
+  if (model && hasValidEffort) return session;
+  const { session: normalized } = await api(`/api/sessions/${session.id}/settings`, {
+    method: "POST",
+    body: JSON.stringify({
+      model: fallback.model,
+      reasoningEffort: hasValidEffort
+        ? session.reasoningEffort
+        : fallback.defaultReasoningEffort,
+    }),
+  });
+  rememberModelSettings(normalized);
+  return normalized;
+}
+
+function renderModelControls(session) {
+  const modelSelect = $("#model-select");
+  const effortSelect = $("#reasoning-effort");
+  const selectedModel = currentModel(session);
+  if (!selectedModel) {
+    modelSelect.innerHTML = `<option>${escapeHtml(
+      state.modelError ? "Модели недоступны" : "Загрузка…",
+    )}</option>`;
+    effortSelect.innerHTML = "<option>—</option>";
+    modelSelect.disabled = true;
+    effortSelect.disabled = true;
+    return;
+  }
+
+  modelSelect.innerHTML = state.models
+    .map((model) => `
+      <option value="${escapeHtml(model.model)}">${escapeHtml(model.displayName)}</option>
+    `)
+    .join("");
+  modelSelect.value = selectedModel.model;
+  effortSelect.innerHTML = selectedModel.supportedReasoningEfforts
+    .map((option) => `
+      <option
+        value="${escapeHtml(option.reasoningEffort)}"
+        title="${escapeHtml(option.description)}"
+      >${escapeHtml(effortLabel(option.reasoningEffort))}</option>
+    `)
+    .join("");
+  const selectedEffort = selectedModel.supportedReasoningEfforts.some(
+    (option) => option.reasoningEffort === session?.reasoningEffort,
+  )
+    ? session.reasoningEffort
+    : selectedModel.defaultReasoningEffort;
+  effortSelect.value = selectedEffort;
+  const disabled = !session || session.status === "running";
+  modelSelect.disabled = disabled;
+  effortSelect.disabled = disabled;
+}
+
+function effortLabel(effort) {
+  return {
+    none: "Без reasoning",
+    minimal: "Минимальный",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "XHigh",
+    ultra: "Ultra",
+  }[effort] ?? effort;
+}
+
+function preferredModelSettings() {
+  if (state.models.length === 0) return {};
+  const model = state.models.find(
+    (item) => item.model === state.modelPreference.model,
+  ) ?? state.models.find((item) => item.isDefault) ?? state.models[0];
+  const reasoningEffort = model.supportedReasoningEfforts.some(
+    (option) => option.reasoningEffort === state.modelPreference.reasoningEffort,
+  )
+    ? state.modelPreference.reasoningEffort
+    : model.defaultReasoningEffort;
+  return { model: model.model, reasoningEffort };
+}
+
+function rememberModelSettings(session) {
+  if (!session?.model || !session?.reasoningEffort) return;
+  state.modelPreference = {
+    model: session.model,
+    reasoningEffort: session.reasoningEffort,
+  };
+  localStorage.setItem(
+    "ronix-agent-model-preference",
+    JSON.stringify(state.modelPreference),
+  );
+}
+
+async function updateSessionSettings(update) {
+  if (!state.sessionId) return;
+  const modelSelect = $("#model-select");
+  const effortSelect = $("#reasoning-effort");
+  const sandboxSelect = $("#sandbox-mode");
+  modelSelect.disabled = true;
+  effortSelect.disabled = true;
+  sandboxSelect.disabled = true;
+  try {
+    const { session } = await api(`/api/sessions/${state.sessionId}/settings`, {
+      method: "POST",
+      body: JSON.stringify(update),
+    });
+    rememberModelSettings(session);
+    renderSessionMeta(session);
+    await loadSessions();
+  } catch (error) {
+    alert(error.message);
+    const { session } = await api(`/api/sessions/${state.sessionId}`);
+    renderSessionMeta(session);
+  }
 }
 
 function connectEvents(sessionId = state.sessionId, initial = false) {
@@ -954,6 +1174,7 @@ function highlightCode(code, language) {
 }
 
 $("#events").addEventListener("click", async (event) => {
+  setSettingsOpen(false);
   const historyButton = event.target.closest("#load-older");
   if (historyButton) {
     await loadOlderEvents(historyButton);
@@ -1067,6 +1288,7 @@ $("#project").addEventListener("change", async () => {
   state.selectedSession = null;
   promptInput.value = "";
   resizePrompt();
+  rememberProject($("#project").value || null);
   await loadSessions();
   renderEvents();
 });
@@ -1082,19 +1304,25 @@ $("#sandbox-mode").addEventListener("change", async (event) => {
     renderSessionMeta(session);
     return;
   }
-  select.disabled = true;
-  try {
-    const { session } = await api(`/api/sessions/${state.sessionId}/settings`, {
-      method: "POST",
-      body: JSON.stringify({ sandboxMode: select.value }),
-    });
-    renderSessionMeta(session);
-    await loadSessions();
-  } catch (error) {
-    alert(error.message);
-    const { session } = await api(`/api/sessions/${state.sessionId}`);
-    renderSessionMeta(session);
-  }
+  await updateSessionSettings({ sandboxMode: select.value });
+});
+
+$("#model-select").addEventListener("change", async (event) => {
+  const model = state.models.find((item) => item.model === event.target.value);
+  if (!model) return;
+  await updateSessionSettings({
+    model: model.model,
+    reasoningEffort: model.defaultReasoningEffort,
+  });
+});
+
+$("#reasoning-effort").addEventListener("change", async (event) => {
+  const model = currentModel();
+  if (!model) return;
+  await updateSessionSettings({
+    model: model.model,
+    reasoningEffort: event.target.value,
+  });
 });
 
 const createProjectModal = $("#create-project-modal");
@@ -1110,9 +1338,12 @@ async function addProject(folder, create = false) {
     body: JSON.stringify({ path: folder, create }),
   });
   $("#project-form").reset();
+  saveCurrentDraft();
+  state.source?.close();
+  state.sessionId = null;
+  state.selectedSession = null;
+  rememberProject(project.id);
   await loadProjects();
-  $("#project").value = project.id;
-  await loadSessions();
   closeCreateProject();
 }
 
@@ -1156,7 +1387,7 @@ $("#new-session").addEventListener("click", async () => {
   try {
     const { session } = await api("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({ projectId, ...preferredModelSettings() }),
     });
     await loadSessions();
     await selectSession(session.id);
@@ -1187,6 +1418,7 @@ $("#prompt-form").addEventListener("submit", async (event) => {
 });
 
 const promptInput = $("#prompt");
+promptInput.addEventListener("focus", () => setSettingsOpen(false));
 promptInput.addEventListener("input", () => {
   resizePrompt();
   saveCurrentDraft();
@@ -1271,7 +1503,17 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-loadProjects()
+function syncViewportHeight() {
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${height}px`);
+}
+
+syncViewportHeight();
+window.visualViewport?.addEventListener("resize", syncViewportHeight);
+window.addEventListener("orientationchange", syncViewportHeight);
+
+loadModels()
+  .then(loadProjects)
   .then(() => setConnection("ready"))
   .catch((error) => {
     setConnection("error");

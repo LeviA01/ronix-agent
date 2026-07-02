@@ -14,7 +14,8 @@ test("serves security headers, rejects foreign origins, and pages event history"
   const projectRoot = join(directory, "projects");
   mkdirSync(projectRoot);
   const store = new Store(join(directory, "data"));
-  const sessions = new SessionManager(store, new FakeAppServer(), 100);
+  const codex = new FakeAppServer();
+  const sessions = new SessionManager(store, codex, 100);
   const config = {
     ...defaultConfig,
     dataDir: join(directory, "data"),
@@ -62,15 +63,77 @@ test("serves security headers, rejects foreign origins, and pages event history"
 
     const now = new Date().toISOString();
     store.createProject({ id: "p1", name: "Test", path: projectRoot, createdAt: now });
+    const models = await fetch(base + "/api/codex/models");
+    assert.equal(models.status, 200);
+    const modelsBody = await models.json() as {
+      models: Array<{ model: string; supportedReasoningEfforts: unknown[] }>;
+    };
+    assert.equal(modelsBody.models[0]?.model, "gpt-5.5");
+    assert.equal(modelsBody.models[0]?.supportedReasoningEfforts.length, 3);
+
     const created = await fetch(base + "/api/sessions", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         origin: base,
       },
-      body: JSON.stringify({ projectId: "p1" }),
+      body: JSON.stringify({
+        projectId: "p1",
+        model: "gpt-5.5",
+        reasoningEffort: "high",
+      }),
     });
     assert.equal(created.status, 201);
+    const createdBody = await created.json() as {
+      session: { id: string; model: string; reasoningEffort: string };
+    };
+    assert.equal(createdBody.session.model, "gpt-5.5");
+    assert.equal(createdBody.session.reasoningEffort, "high");
+
+    const updated = await fetch(
+      `${base}/api/sessions/${createdBody.session.id}/settings`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: base,
+        },
+        body: JSON.stringify({ model: "gpt-5.5", reasoningEffort: "xhigh" }),
+      },
+    );
+    assert.equal(updated.status, 200);
+    assert.equal(store.getSession(createdBody.session.id)?.reasoningEffort, "xhigh");
+
+    const invalidEffort = await fetch(
+      `${base}/api/sessions/${createdBody.session.id}/settings`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: base,
+        },
+        body: JSON.stringify({ model: "gpt-5.5", reasoningEffort: "impossible" }),
+      },
+    );
+    assert.equal(invalidEffort.status, 400);
+
+    store.updateSession(createdBody.session.id, {
+      status: "running",
+      activeTurnId: "turn-active",
+    });
+    const activeUpdate = await fetch(
+      `${base}/api/sessions/${createdBody.session.id}/settings`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: base,
+        },
+        body: JSON.stringify({ reasoningEffort: "medium" }),
+      },
+    );
+    assert.equal(activeUpdate.status, 409);
+
     const session = sessions.createSession("p1");
     store.addEvent(session.id, "user.message", { text: "one" });
     const second = store.addEvent(session.id, "user.message", { text: "two" });

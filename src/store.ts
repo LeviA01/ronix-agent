@@ -23,6 +23,8 @@ type SessionRow = {
   active_turn_id: string | null;
   status: SessionStatus;
   sandbox_mode: SandboxMode;
+  model: string | null;
+  reasoning_effort: string | null;
   last_error: string | null;
   created_at: string;
   last_activity_at: string;
@@ -53,6 +55,8 @@ function sessionFromRow(row: SessionRow): Session {
     activeTurnId: row.active_turn_id,
     status: row.status,
     sandboxMode: row.sandbox_mode,
+    model: row.model,
+    reasoningEffort: row.reasoning_effort,
     lastError: row.last_error,
     createdAt: row.created_at,
     lastActivityAt: row.last_activity_at,
@@ -92,6 +96,8 @@ export class Store {
         active_turn_id TEXT,
         status TEXT NOT NULL,
         sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        model TEXT,
+        reasoning_effort TEXT,
         last_error TEXT,
         created_at TEXT NOT NULL,
         last_activity_at TEXT NOT NULL
@@ -121,6 +127,12 @@ export class Store {
       this.db.exec(
         "ALTER TABLE sessions ADD COLUMN sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write'",
       );
+    }
+    if (!names.has("model")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
+    }
+    if (!names.has("reasoning_effort")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
     }
   }
 
@@ -154,9 +166,9 @@ export class Store {
     this.db
       .prepare(`
         INSERT INTO sessions (
-          id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-          last_error, created_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, project_id, thread_id, active_turn_id, status, sandbox_mode, model,
+          reasoning_effort, last_error, created_at, last_activity_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         session.id,
@@ -165,6 +177,8 @@ export class Store {
         session.activeTurnId,
         session.status,
         session.sandboxMode,
+        session.model,
+        session.reasoningEffort,
         session.lastError,
         session.createdAt,
         session.lastActivityAt,
@@ -177,14 +191,14 @@ export class Store {
       ? (this.db
           .prepare(`
             SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-                   last_error, created_at, last_activity_at
+                   model, reasoning_effort, last_error, created_at, last_activity_at
             FROM sessions WHERE project_id = ? ORDER BY created_at DESC
           `)
           .all(projectId) as SessionRow[])
       : (this.db
           .prepare(`
             SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-                   last_error, created_at, last_activity_at
+                   model, reasoning_effort, last_error, created_at, last_activity_at
             FROM sessions ORDER BY created_at DESC
           `)
           .all() as SessionRow[]);
@@ -195,7 +209,7 @@ export class Store {
     const row = this.db
       .prepare(`
         SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-               last_error, created_at, last_activity_at
+               model, reasoning_effort, last_error, created_at, last_activity_at
         FROM sessions WHERE id = ?
       `)
       .get(id) as SessionRow | undefined;
@@ -206,7 +220,7 @@ export class Store {
     const row = this.db
       .prepare(`
         SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-               last_error, created_at, last_activity_at
+               model, reasoning_effort, last_error, created_at, last_activity_at
         FROM sessions WHERE thread_id = ?
       `)
       .get(threadId) as SessionRow | undefined;
@@ -225,6 +239,8 @@ export class Store {
       activeTurnId?: string | null;
       status?: SessionStatus;
       sandboxMode?: SandboxMode;
+      model?: string | null;
+      reasoningEffort?: string | null;
       lastError?: string | null;
     },
   ): Session {
@@ -238,6 +254,11 @@ export class Store {
         update.activeTurnId === undefined ? current.activeTurnId : update.activeTurnId,
       status: update.status ?? current.status,
       sandboxMode: update.sandboxMode ?? current.sandboxMode,
+      model: update.model === undefined ? current.model : update.model,
+      reasoningEffort:
+        update.reasoningEffort === undefined
+          ? current.reasoningEffort
+          : update.reasoningEffort,
       lastError: update.lastError === undefined ? current.lastError : update.lastError,
       lastActivityAt: new Date().toISOString(),
     };
@@ -246,7 +267,7 @@ export class Store {
       .prepare(`
         UPDATE sessions
         SET thread_id = ?, active_turn_id = ?, status = ?, sandbox_mode = ?,
-            last_error = ?, last_activity_at = ?
+            model = ?, reasoning_effort = ?, last_error = ?, last_activity_at = ?
         WHERE id = ?
       `)
       .run(
@@ -254,6 +275,8 @@ export class Store {
         next.activeTurnId,
         next.status,
         next.sandboxMode,
+        next.model,
+        next.reasoningEffort,
         next.lastError,
         next.lastActivityAt,
         id,

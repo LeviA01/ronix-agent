@@ -27,6 +27,25 @@ export class FakeAppServer implements CodexAppServer {
     if (method === "turn/start") {
       return { turn: { id: `turn-${this.nextTurn++}` } } as T;
     }
+    if (method === "model/list") {
+      return {
+        data: [{
+          id: "gpt-5.5",
+          model: "gpt-5.5",
+          displayName: "GPT-5.5",
+          description: "Test model",
+          hidden: false,
+          isDefault: true,
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "medium", description: "Balanced" },
+            { reasoningEffort: "high", description: "Deep" },
+            { reasoningEffort: "xhigh", description: "Extra deep" },
+          ],
+        }],
+        nextCursor: null,
+      } as T;
+    }
     if (method === "account/read") return { account: null } as T;
     if (method === "account/rateLimits/read") {
       return { rateLimits: {}, rateLimitsByLimitId: null, rateLimitResetCredits: null } as T;

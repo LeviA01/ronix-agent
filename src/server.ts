@@ -15,7 +15,7 @@ import { HttpError, json, readJson, requireString } from "./http.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
-import type { SandboxMode, StoredEvent } from "./types.js";
+import type { CodexModel, SandboxMode, StoredEvent } from "./types.js";
 
 type Config = typeof defaultConfig;
 
@@ -56,6 +56,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
   let shuttingDown = false;
   let usageCache: { value: unknown; expiresAt: number } | null = null;
   let usagePending: Promise<unknown> | null = null;
+  let modelCache: { value: CodexModel[]; expiresAt: number } | null = null;
+  let modelPending: Promise<CodexModel[]> | null = null;
 
   async function getUsage(force: boolean): Promise<unknown> {
     if (!force && usageCache && usageCache.expiresAt > Date.now()) return usageCache.value;
@@ -69,6 +71,20 @@ export function createApplication(options: ApplicationOptions = {}): Application
         usagePending = null;
       });
     return usagePending;
+  }
+
+  async function getModels(): Promise<CodexModel[]> {
+    if (modelCache && modelCache.expiresAt > Date.now()) return modelCache.value;
+    if (modelPending) return modelPending;
+    modelPending = sessions.listModels()
+      .then((value) => {
+        modelCache = { value, expiresAt: Date.now() + 60_000 };
+        return value;
+      })
+      .finally(() => {
+        modelPending = null;
+      });
+    return modelPending;
   }
 
   async function handleApi(
@@ -131,6 +147,11 @@ export function createApplication(options: ApplicationOptions = {}): Application
       return true;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/codex/models") {
+      json(response, 200, { models: await getModels() });
+      return true;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/projects") {
       json(response, 200, { projects: store.listProjects(), projectRoots: config.projectRoots });
       return true;
@@ -177,10 +198,27 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
 
     if (request.method === "POST" && url.pathname === "/api/sessions") {
-      const body = await readJson<{ projectId?: unknown }>(request);
+      const body = await readJson<{
+        projectId?: unknown;
+        model?: unknown;
+        reasoningEffort?: unknown;
+      }>(request);
       const projectId = requireString(body.projectId, "projectId");
       if (!store.getProject(projectId)) throw new HttpError(404, "Project not found");
-      json(response, 201, { session: sessions.createSession(projectId) });
+      const requestedModel = optionalString(body.model, "model");
+      const requestedEffort = optionalString(body.reasoningEffort, "reasoningEffort");
+      const modelSettings = requestedModel || requestedEffort
+        ? resolveModelSettings(
+            await getModels(),
+            null,
+            null,
+            requestedModel,
+            requestedEffort,
+          )
+        : {};
+      json(response, 201, {
+        session: sessions.createSession(projectId, modelSettings),
+      });
       return true;
     }
 
@@ -292,16 +330,49 @@ export function createApplication(options: ApplicationOptions = {}): Application
       }
 
       if (request.method === "POST" && parts[3] === "settings") {
-        const body = await readJson<{ sandboxMode?: unknown }>(request);
-        if (
-          typeof body.sandboxMode !== "string"
-          || !SANDBOX_MODES.has(body.sandboxMode as SandboxMode)
-        ) {
-          throw new HttpError(400, "Invalid sandboxMode");
+        const body = await readJson<{
+          sandboxMode?: unknown;
+          model?: unknown;
+          reasoningEffort?: unknown;
+        }>(request);
+        const update: {
+          sandboxMode?: SandboxMode;
+          model?: string;
+          reasoningEffort?: string;
+        } = {};
+        if (body.sandboxMode !== undefined) {
+          if (
+            typeof body.sandboxMode !== "string"
+            || !SANDBOX_MODES.has(body.sandboxMode as SandboxMode)
+          ) {
+            throw new HttpError(400, "Invalid sandboxMode");
+          }
+          update.sandboxMode = body.sandboxMode as SandboxMode;
         }
-        json(response, 200, {
-          session: sessions.updateSandboxMode(sessionId, body.sandboxMode as SandboxMode),
-        });
+        const requestedModel = optionalString(body.model, "model");
+        const requestedEffort = optionalString(body.reasoningEffort, "reasoningEffort");
+        if (requestedModel || requestedEffort) {
+          Object.assign(
+            update,
+            resolveModelSettings(
+              await getModels(),
+              session.model,
+              session.reasoningEffort,
+              requestedModel,
+              requestedEffort,
+            ),
+          );
+        }
+        if (Object.keys(update).length === 0) {
+          throw new HttpError(400, "No session settings were provided");
+        }
+        try {
+          json(response, 200, {
+            session: sessions.updateSettings(sessionId, update),
+          });
+        } catch (error) {
+          throw sessionHttpError(error);
+        }
         return true;
       }
 
@@ -465,6 +536,44 @@ function positiveInteger(value: string | undefined | null, fallback: number): nu
 
 function boundedLimit(value: string | null, fallback: number): number {
   return Math.min(500, Math.max(1, positiveInteger(value, fallback)));
+}
+
+function optionalString(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new HttpError(400, `${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function resolveModelSettings(
+  models: CodexModel[],
+  currentModel: string | null,
+  currentEffort: string | null,
+  requestedModel?: string,
+  requestedEffort?: string,
+): { model: string; reasoningEffort: string } {
+  if (models.length === 0) throw new HttpError(503, "Codex returned no available models");
+  const modelName = requestedModel ?? currentModel;
+  const selected = modelName
+    ? models.find((model) => model.model === modelName || model.id === modelName)
+    : models.find((model) => model.isDefault) ?? models[0];
+  if (!selected) throw new HttpError(400, `Model is not available: ${modelName}`);
+
+  const effort = requestedEffort
+    ?? (requestedModel && requestedModel !== currentModel ? null : currentEffort)
+    ?? selected.defaultReasoningEffort;
+  if (
+    !selected.supportedReasoningEfforts.some(
+      (option) => option.reasoningEffort === effort,
+    )
+  ) {
+    throw new HttpError(
+      400,
+      `Reasoning effort ${effort} is not supported by ${selected.displayName}`,
+    );
+  }
+  return { model: selected.model, reasoningEffort: effort };
 }
 
 function sessionHttpError(error: unknown): HttpError {

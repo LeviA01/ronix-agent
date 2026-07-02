@@ -6,6 +6,7 @@ import type {
 } from "./app-server-client.js";
 import type { Store } from "./store.js";
 import type {
+  CodexModel,
   PendingApproval,
   SandboxMode,
   Session,
@@ -17,6 +18,7 @@ type RpcId = number | string;
 
 type ThreadResponse = { thread: { id: string } };
 type TurnResponse = { turn: { id: string } };
+type ModelListResponse = { data: CodexModel[]; nextCursor: string | null };
 
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
@@ -56,7 +58,10 @@ export class SessionManager {
     }
   }
 
-  createSession(projectId: string): Session {
+  createSession(
+    projectId: string,
+    settings: { model?: string | null; reasoningEffort?: string | null } = {},
+  ): Session {
     const now = new Date().toISOString();
     return this.store.createSession({
       id: randomUUID(),
@@ -65,6 +70,8 @@ export class SessionManager {
       activeTurnId: null,
       status: "ready",
       sandboxMode: "workspace-write",
+      model: settings.model ?? null,
+      reasoningEffort: settings.reasoningEffort ?? null,
       lastError: null,
       createdAt: now,
       lastActivityAt: now,
@@ -99,12 +106,14 @@ export class SessionManager {
             sandbox: session.sandboxMode,
             approvalPolicy: approvalPolicy(session.sandboxMode),
             approvalsReviewer: "user",
+            ...(session.model ? { model: session.model } : {}),
           })
         : await this.codex.request<ThreadResponse>("thread/start", {
             cwd: project.path,
             sandbox: session.sandboxMode,
             approvalPolicy: approvalPolicy(session.sandboxMode),
             approvalsReviewer: "user",
+            ...(session.model ? { model: session.model } : {}),
           });
 
       if (thread.thread.id !== session.threadId) {
@@ -113,6 +122,8 @@ export class SessionManager {
       const turn = await this.codex.request<TurnResponse>("turn/start", {
         threadId: thread.thread.id,
         input: [{ type: "text", text: prompt }],
+        ...(session.model ? { model: session.model } : {}),
+        ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       });
       this.store.updateSession(sessionId, {
         status: "running",
@@ -167,13 +178,39 @@ export class SessionManager {
   }
 
   updateSandboxMode(sessionId: string, sandboxMode: SandboxMode): Session {
+    return this.updateSettings(sessionId, { sandboxMode });
+  }
+
+  updateSettings(
+    sessionId: string,
+    update: {
+      sandboxMode?: SandboxMode;
+      model?: string;
+      reasoningEffort?: string;
+    },
+  ): Session {
     const session = this.requireSession(sessionId);
     if (session.status === "running" || session.activeTurnId) {
-      throw new Error("Cannot change access mode while a turn is running");
+      throw new Error("Cannot change session settings while a turn is running");
     }
-    const updated = this.store.updateSession(sessionId, { sandboxMode });
-    this.publish(sessionId, "session.settings", { sandboxMode });
+    const updated = this.store.updateSession(sessionId, update);
+    this.publish(sessionId, "session.settings", update);
     return updated;
+  }
+
+  async listModels(): Promise<CodexModel[]> {
+    const models: CodexModel[] = [];
+    let cursor: string | null = null;
+    do {
+      const response: ModelListResponse =
+        await this.codex.request<ModelListResponse>("model/list", {
+          cursor,
+          includeHidden: false,
+        });
+      models.push(...response.data.filter((model) => !model.hidden));
+      cursor = response.nextCursor;
+    } while (cursor);
+    return models;
   }
 
   listApprovals(sessionId: string): PendingApproval[] {

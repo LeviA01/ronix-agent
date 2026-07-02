@@ -1,4 +1,5 @@
 :root {
+  --app-height: 100dvh;
   color-scheme: dark;
   --bg: #090b0e;
   --surface: #111419;
@@ -88,7 +89,7 @@ button:disabled {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   width: 100%;
-  height: 100dvh;
+  height: var(--app-height);
   min-height: 0;
   overflow: hidden;
 }
@@ -167,6 +168,7 @@ button:disabled {
 }
 
 .mobile-sidebar-button,
+.mobile-settings-button,
 .sidebar-backdrop {
   display: none;
 }
@@ -784,11 +786,12 @@ textarea:focus {
 }
 
 .chat {
+  position: relative;
   display: grid;
   height: 100%;
   min-height: 0;
   min-width: 0;
-  grid-template-rows: 69px minmax(0, 1fr) auto;
+  grid-template-rows: 69px auto minmax(0, 1fr) auto;
   overflow: hidden;
   background:
     radial-gradient(circle at 50% -18%, rgb(76 98 120 / 20%), transparent 42%),
@@ -855,47 +858,64 @@ textarea:focus {
   color: #737b87;
 }
 
-.chat-actions {
+.session-settings {
   display: flex;
   align-items: center;
-  gap: 9px;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 22px;
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
+  background: rgb(13 15 19 / 90%);
 }
 
-.access-mode {
+.setting-field {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 7px;
-  min-height: 34px;
-  padding-left: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgb(23 26 32 / 75%);
   color: var(--muted);
+  font-size: 11px;
+}
+
+.setting-field > span {
+  flex: 0 0 auto;
+}
+
+.setting-field select {
+  min-width: 0;
+  min-height: 34px;
+  border-radius: 9px;
+  padding: 0 28px 0 9px;
+  color: var(--text);
+  background: var(--panel);
   font-size: 12px;
 }
 
-.access-mode select {
-  min-width: 104px;
-  min-height: 32px;
-  border: 0;
-  border-left: 1px solid var(--border);
-  border-radius: 0 9px 9px 0;
-  padding: 0 9px;
-  color: var(--text);
-  background: var(--panel);
+.model-field select {
+  width: 170px;
 }
 
-.access-mode.mode-read-only {
+.effort-field select {
+  width: 110px;
+}
+
+.access-mode {
+  margin-right: auto;
+}
+
+.access-mode select {
+  width: 130px;
+}
+
+.access-mode.mode-read-only select {
   border-color: #35404c;
 }
 
-.access-mode.mode-danger-full-access {
-  border-color: #5a393f;
-  background: rgb(55 24 31 / 58%);
-}
-
 .access-mode.mode-danger-full-access select {
+  border-color: #5a393f;
   color: #f5a4b0;
+  background: rgb(55 24 31 / 58%);
 }
 
 .load-older {
@@ -979,11 +999,17 @@ textarea:focus {
   min-height: 0;
   flex-direction: column;
   gap: 20px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding: 34px max(24px, calc((100% - 840px) / 2)) 28px;
   scroll-behavior: auto;
+}
+
+.events > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .empty-state {
@@ -1062,6 +1088,8 @@ textarea:focus {
 }
 
 .bubble {
+  min-width: 0;
+  max-width: 100%;
   padding: 12px 15px;
   border: 1px solid var(--border);
   border-radius: 5px 16px 16px 16px;
@@ -1081,6 +1109,7 @@ textarea:focus {
 }
 
 .inline-code {
+  overflow-wrap: anywhere;
   padding: 2px 5px;
   border: 1px solid #343943;
   border-radius: 5px;
@@ -1470,7 +1499,7 @@ textarea:focus {
     inset: 0 auto 0 0;
     display: flex;
     width: min(88vw, 360px);
-    height: 100dvh;
+    height: var(--app-height);
     padding:
       calc(14px + env(safe-area-inset-top))
       14px
@@ -1516,7 +1545,8 @@ textarea:focus {
     font-size: 18px;
   }
 
-  .mobile-sidebar-button {
+  .mobile-sidebar-button,
+  .mobile-settings-button {
     display: grid;
     width: 44px;
     height: 44px;
@@ -1526,6 +1556,22 @@ textarea:focus {
     border-radius: 12px;
     color: #d9dde5;
     background: #191b20;
+  }
+
+  .mobile-settings-button svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+  }
+
+  .mobile-settings-button[aria-expanded="true"] {
+    border-color: #4f9f78;
+    color: var(--accent);
+    background: #17251f;
   }
 
   .close-sidebar {
@@ -1623,7 +1669,7 @@ textarea:focus {
 
   .chat {
     width: 100%;
-    height: 100dvh;
+    height: var(--app-height);
     min-height: 0;
     grid-template-rows: auto minmax(0, 1fr) auto;
     overflow: hidden;
@@ -1647,30 +1693,59 @@ textarea:focus {
     font-size: 14px;
   }
 
-  .debug-toggle {
+  .session-settings {
+    position: absolute;
+    z-index: 25;
+    top: calc(64px + env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    left: max(12px, env(safe-area-inset-left));
     display: none;
+    grid-template-columns:
+      minmax(0, 1.35fr)
+      minmax(104px, .7fr)
+      minmax(112px, .8fr);
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid #343a44;
+    border-radius: 15px;
+    background: rgb(18 21 26 / 98%);
+    box-shadow: 0 18px 48px rgb(0 0 0 / 48%);
   }
 
-  .access-mode > span {
-    display: none;
+  .chat.settings-open .session-settings {
+    display: grid;
+  }
+
+  .setting-field {
+    display: grid;
+    gap: 4px;
+  }
+
+  .setting-field > span {
+    padding-left: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .setting-field select,
+  .access-mode select,
+  .model-field select,
+  .effort-field select {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    padding: 0 27px 0 9px;
+    font-size: 13px;
   }
 
   .access-mode {
-    min-width: 92px;
-    max-width: 112px;
-    min-height: 40px;
-    padding-left: 0;
-    overflow: hidden;
+    margin-right: 0;
   }
 
-  .access-mode select {
-    width: 100%;
-    min-width: 92px;
-    max-width: 112px;
-    min-height: 38px;
-    border-left: 0;
-    padding: 0 8px;
-    font-size: 12px;
+  .debug-toggle {
+    display: none;
   }
 
   .events {
@@ -1681,11 +1756,19 @@ textarea:focus {
       18px max(12px, env(safe-area-inset-right))
       16px max(12px, env(safe-area-inset-left));
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     scrollbar-gutter: auto;
+    scroll-padding-bottom: 18px;
   }
 
   .message-content {
+    min-width: 0;
     max-width: calc(100% - 38px);
+  }
+
+  .message {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .message.user .message-content {
@@ -1699,7 +1782,7 @@ textarea:focus {
   }
 
   .code-block {
-    max-width: calc(100vw - 74px);
+    max-width: 100%;
   }
 
   .code-block pre {
@@ -1733,6 +1816,7 @@ textarea:focus {
 
   .composer textarea {
     min-height: 48px;
+    max-height: min(180px, 38dvh);
     padding: 12px 13px;
     font-size: 16px;
   }
@@ -1751,6 +1835,14 @@ textarea:focus {
 }
 
 @media (max-width: 520px) {
+  .session-settings {
+    grid-template-columns: minmax(0, 1fr) minmax(106px, .55fr);
+  }
+
+  .access-mode {
+    grid-column: 1 / -1;
+  }
+
   .interrupt-button span {
     display: none;
   }

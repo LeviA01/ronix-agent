@@ -106,47 +106,72 @@
                             <span>Создайте сессию, чтобы начать работу</span>
                         </div>
                     </div>
-                    <div class="chat-actions">
-                        <label
-                            class="access-mode"
-                            title="Права Codex для этой сессии"
-                            hidden
-                        >
-                            <span>Доступ</span>
-                            <select id="sandbox-mode" disabled>
-                                <option value="read-only">Только чтение</option>
-                                <option value="workspace-write">Проект</option>
-                                <option value="danger-full-access">
-                                    Полный
-                                </option>
-                            </select>
-                        </label>
-                        <label
-                            class="debug-toggle"
-                            title="Показывать сырые события Codex"
-                        >
-                            <input id="show-technical" type="checkbox" />
-                            <span>Технические</span>
-                        </label>
-                        <button
-                            id="interrupt"
-                            class="interrupt-button"
-                            disabled
-                            hidden
-                        >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <rect
-                                    x="7"
-                                    y="7"
-                                    width="10"
-                                    height="10"
-                                    rx="2"
-                                ></rect>
-                            </svg>
-                            <span>Стоп</span>
-                        </button>
-                    </div>
+                    <button
+                        id="toggle-settings"
+                        class="mobile-settings-button"
+                        type="button"
+                        aria-label="Настройки сессии"
+                        aria-controls="session-settings"
+                        aria-expanded="false"
+                        hidden
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 7h10M18 7h2M4 17h2M10 17h10"></path>
+                            <circle cx="16" cy="7" r="2"></circle>
+                            <circle cx="8" cy="17" r="2"></circle>
+                        </svg>
+                    </button>
+                    <button
+                        id="interrupt"
+                        class="interrupt-button"
+                        disabled
+                        hidden
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect
+                                x="7"
+                                y="7"
+                                width="10"
+                                height="10"
+                                rx="2"
+                            ></rect>
+                        </svg>
+                        <span>Стоп</span>
+                    </button>
                 </header>
+
+                <div id="session-settings" class="session-settings" hidden>
+                    <label class="setting-field model-field">
+                        <span>Модель</span>
+                        <select id="model-select" disabled>
+                            <option>Загрузка…</option>
+                        </select>
+                    </label>
+                    <label class="setting-field effort-field">
+                        <span>Режим</span>
+                        <select id="reasoning-effort" disabled>
+                            <option>—</option>
+                        </select>
+                    </label>
+                    <label
+                        class="setting-field access-mode"
+                        title="Права Codex для этой сессии"
+                    >
+                        <span>Доступ</span>
+                        <select id="sandbox-mode" disabled>
+                            <option value="read-only">Только чтение</option>
+                            <option value="workspace-write">Проект</option>
+                            <option value="danger-full-access">Полный</option>
+                        </select>
+                    </label>
+                    <label
+                        class="debug-toggle"
+                        title="Показывать сырые события Codex"
+                    >
+                        <input id="show-technical" type="checkbox" />
+                        <span>Технические события</span>
+                    </label>
+                </div>
 
                 <div
                     id="events"

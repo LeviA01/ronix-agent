@@ -227,6 +227,7 @@ GET  /api/auth/status
 POST /api/auth/login
 POST /api/auth/logout
 GET  /api/codex/usage
+GET  /api/codex/models
 GET  /api/health
 GET  /api/projects
 POST /api/projects
@@ -246,7 +247,10 @@ POST /api/sessions/:id/approvals/:approvalId
 
 ## Состояние и восстановление
 
-- Сессия работает прямо в директории проекта; отдельные Git worktree ещё не создаются.
+- Сессия хранит выбранные модель, reasoning effort и режим доступа и работает
+  прямо в директории проекта; отдельные Git worktree ещё не создаются.
+- Последние открытые проект и сессия, а также настройки для новых сессий
+  сохраняются локально в браузере.
 - При штатном завершении Ronix прерывает активные turns перед остановкой
   app-server. Если процесс был убит аварийно, оставшиеся `running`-сессии при
   следующем запуске переводятся в `error`; сохранённый `threadId` остаётся и
