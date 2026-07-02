@@ -50,6 +50,19 @@ test("serves security headers, rejects foreign origins, and pages event history"
     assert.equal(health.status, 200);
     assert.match(health.headers.get("content-security-policy") ?? "", /default-src/);
     assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+    const healthBody = await health.json() as {
+      deploymentMode: string;
+      modules: Array<{ id: string; enabled: boolean }>;
+    };
+    assert.equal(healthBody.deploymentMode, "local");
+    assert.deepEqual(healthBody.modules, [
+      { id: "tts", enabled: false, configured: false, provider: null },
+      { id: "stt", enabled: false, configured: false, provider: null },
+    ]);
+
+    const modules = await fetch(base + "/api/modules");
+    assert.equal(modules.status, 200);
+    assert.deepEqual(await modules.json(), { modules: healthBody.modules });
 
     const foreign = await fetch(base + "/api/sessions", {
       method: "POST",

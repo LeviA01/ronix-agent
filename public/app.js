@@ -264,6 +264,7 @@ async function loadSessions() {
     state.sessions = [];
     renderSessions();
     renderSessionMeta(null);
+    renderEvents();
     return;
   }
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
@@ -482,12 +483,20 @@ function renderSessionMeta(session) {
   state.selectedSession = session;
   const meta = $("#session-meta");
   if (!session) {
-    $("#session-title").textContent = "Выберите сессию";
+    const project = state.projects.find((item) => item.id === $("#project").value);
+    const hasSessions = state.sessions.length > 0;
+    $("#session-title").textContent = project?.name ?? "Выберите проект";
     meta.className = "session-meta";
-    meta.innerHTML = '<span class="session-meta-dot"></span><span>Создайте сессию, чтобы начать работу</span>';
+    meta.innerHTML = `
+      <span class="session-meta-dot"></span>
+      <span>${project
+        ? hasSessions ? "Выберите сессию проекта" : "В проекте пока нет сессий"
+        : "Добавьте проект, чтобы начать работу"}</span>
+    `;
     $("#session-settings").hidden = true;
     $("#toggle-settings").hidden = true;
     $("#interrupt").hidden = true;
+    $("#prompt-form").hidden = true;
     $("#send").disabled = true;
     $("#sandbox-mode").disabled = true;
     renderModelControls(null);
@@ -501,6 +510,7 @@ function renderSessionMeta(session) {
     <span>${escapeHtml(statusLabel(session.status) + thread)}</span>
   `;
   $("#send").disabled = session.status === "running" || session.status === "stopped";
+  $("#prompt-form").hidden = false;
   $("#interrupt").disabled = session.status !== "running";
   $("#interrupt").hidden = session.status !== "running";
   const sandbox = $("#sandbox-mode");
@@ -729,13 +739,33 @@ function renderEvents(scrollToBottom = true) {
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
   const hasApprovals = Object.keys(state.approvals).length > 0;
   if (events.length === 0 && !hasApprovals) {
+    const hasProject = Boolean($("#project").value);
+    const hasSessions = state.sessions.length > 0;
+    const emptyTitle = state.sessionId
+      ? "Начните диалог"
+      : !hasProject
+        ? "Добавьте проект"
+        : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
+    const emptyDescription = state.sessionId
+      ? "Опишите задачу в поле ниже."
+      : !hasProject
+        ? "Укажите каталог проекта в боковой панели."
+        : hasSessions
+          ? "Выберите существующую сессию в боковой панели."
+          : "Создайте первую сессию, чтобы начать работу с Codex.";
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">›_</div>
-        <h3>${state.sessionId ? "Начните диалог" : "Codex готов к работе"}</h3>
-        <p>${state.sessionId ? "Опишите задачу в поле ниже." : "Выберите или создайте сессию проекта."}</p>
+        <h3>${emptyTitle}</h3>
+        <p>${emptyDescription}</p>
+        ${hasProject && !hasSessions
+          ? '<button class="empty-action" type="button" data-create-session>Создать сессию</button>'
+          : ""}
       </div>
     `;
+    container.querySelector("[data-create-session]")?.addEventListener("click", () => {
+      void createSession();
+    });
     return;
   }
   renderHistoryButton(container);
@@ -1274,9 +1304,16 @@ function updateApprovalState(event) {
   }
 }
 
-$("#project").addEventListener("change", async () => {
-  saveCurrentDraft();
+function resetProjectSessionView() {
   state.source?.close();
+  state.source = null;
+  clearTimeout(state.reconnectTimer);
+  clearTimeout(state.sessionRefreshTimer);
+  if (state.liveRenderFrame) cancelAnimationFrame(state.liveRenderFrame);
+  state.reconnectTimer = null;
+  state.sessionRefreshTimer = null;
+  state.liveRenderFrame = null;
+  state.sessions = [];
   state.sessionId = null;
   state.events = [];
   state.lastSequence = 0;
@@ -1288,6 +1325,14 @@ $("#project").addEventListener("change", async () => {
   state.selectedSession = null;
   promptInput.value = "";
   resizePrompt();
+  renderSessions();
+  renderSessionMeta(null);
+  renderEvents();
+}
+
+$("#project").addEventListener("change", async () => {
+  saveCurrentDraft();
+  resetProjectSessionView();
   rememberProject($("#project").value || null);
   await loadSessions();
   renderEvents();
@@ -1339,12 +1384,21 @@ async function addProject(folder, create = false) {
   });
   $("#project-form").reset();
   saveCurrentDraft();
-  state.source?.close();
-  state.sessionId = null;
-  state.selectedSession = null;
+  state.projects = [
+    ...state.projects.filter((item) => item.id !== project.id),
+    project,
+  ];
+  const option = document.createElement("option");
+  option.value = project.id;
+  option.textContent = project.name;
+  $("#project").append(option);
+  $("#project").value = project.id;
+  resetProjectSessionView();
   rememberProject(project.id);
   await loadProjects();
   closeCreateProject();
+  $(".add-project").open = false;
+  setSidebarOpen(false);
 }
 
 $("#project-form").addEventListener("submit", async (event) => {
@@ -1381,7 +1435,7 @@ $("#confirm-create-project").addEventListener("click", async () => {
   }
 });
 
-$("#new-session").addEventListener("click", async () => {
+async function createSession() {
   const projectId = $("#project").value;
   if (!projectId) return;
   try {
@@ -1390,11 +1444,13 @@ $("#new-session").addEventListener("click", async () => {
       body: JSON.stringify({ projectId, ...preferredModelSettings() }),
     });
     await loadSessions();
-    await selectSession(session.id);
+    if (state.sessionId !== session.id) await selectSession(session.id);
   } catch (error) {
     alert(error.message);
   }
-});
+}
+
+$("#new-session").addEventListener("click", () => void createSession());
 
 $("#prompt-form").addEventListener("submit", async (event) => {
   event.preventDefault();

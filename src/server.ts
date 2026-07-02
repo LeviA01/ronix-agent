@@ -12,6 +12,7 @@ import { AppServerClient } from "./app-server-client.js";
 import { AuthManager } from "./auth.js";
 import { config as defaultConfig } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
+import { moduleStatuses } from "./modules.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
@@ -138,7 +139,15 @@ export function createApplication(options: ApplicationOptions = {}): Application
       json(response, shuttingDown ? 503 : 200, {
         ok: !shuttingDown,
         codexRuntime: config.codexPath ?? "codex",
+        deploymentMode: config.deploymentMode,
+        accessMode: config.accessMode,
+        modules: moduleStatuses(config.modules),
       });
+      return true;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/modules") {
+      json(response, 200, { modules: moduleStatuses(config.modules) });
       return true;
     }
 

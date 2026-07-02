@@ -17,9 +17,12 @@
 - пагинация истории и ограничение размера журнала событий;
 - адаптивный web-клиент с мобильным меню;
 - вход по 32-байтному ключу через защищённую cookie;
+- интерактивная первичная настройка для локального запуска и VDS;
+- диагностика Node.js, Codex, каталогов и модулей перед запуском;
+- необязательные TTS/STT-модули, выключенные по умолчанию;
 - просмотр лимитов и статистики использования Codex.
 
-## Запуск
+## Быстрый запуск
 
 Требования:
 
@@ -27,18 +30,51 @@
 - установленный и авторизованный Codex CLI (`codex login status`);
 - проект должен быть Git-репозиторием.
 
+Первичная настройка:
+
 ```bash
-npm install
-npm run dev
+npm ci
+npm run setup
+npm run doctor
+npm run build
+npm start
 ```
 
-Открыть `http://127.0.0.1:8787`.
+Мастер спрашивает:
 
-Ronix разрешает добавлять проекты только из каталогов, перечисленных в
-`PROJECT_ROOTS`. Для локального запуска значение по умолчанию —
-`/home/ronix/Projects/RONIX`:
+- локальный запуск или VDS;
+- корневые каталоги проектов;
+- каталог данных и порт;
+- Tailscale или публичный HTTPS reverse proxy для VDS;
+- нужен ли вход по ключу;
+- путь к Codex CLI.
+
+Результат сохраняется в `.env` с правами `0600`. Существующий ключ при
+повторном запуске мастера сохраняется, пока пользователь явно не запросит новый.
+Для неинтерактивной локальной конфигурации с безопасными значениями по умолчанию:
 
 ```bash
+npm run setup -- --mode local --yes
+```
+
+Открыть `http://127.0.0.1:8787`. Полная инструкция для локального компьютера и
+VDS находится в [docs/deployment.md](docs/deployment.md).
+
+## Конфигурация
+
+Ronix разрешает добавлять проекты только из каталогов, перечисленных в
+`PROJECT_ROOTS`. Мастер записывает их в `.env`; переменные процесса имеют
+приоритет над этим файлом. Другой конфиг можно передать через
+`RONIX_CONFIG=/absolute/path/config.env`.
+
+В локальном режиме короткое имя вроде `RONIX` считается относительно
+`~/Projects`, поэтому превращается в `~/Projects/RONIX`. На VDS относительные
+пути считаются от `/srv/ronix-projects`. Перед записью мастер всегда показывает
+итоговые абсолютные пути; абсолютные пути и форма `~/...` принимаются напрямую.
+
+```bash
+RONIX_DEPLOYMENT_MODE=local
+RONIX_ACCESS_MODE=local
 HOST=127.0.0.1
 PORT=8787
 DATA_DIR=./data
@@ -49,11 +85,6 @@ EVENT_HISTORY_LIMIT=200
 EVENT_RETENTION=5000
 SHUTDOWN_TIMEOUT_MS=10000
 ```
-
-В production-примере ниже используется отдельный каталог
-`/srv/ronix-projects`. Это не дополнительная встроенная папка, а значение
-`PROJECT_ROOTS` из systemd-сервиса. Создаваемый или добавляемый проект должен
-находиться внутри одного из указанных корневых каталогов.
 
 В web-интерфейсе достаточно указать имя папки, например `veyra`. Ronix ищет её
 по очереди во всех каталогах из `PROJECT_ROOTS`. Если папка не найдена,
@@ -96,7 +127,25 @@ Nginx). Сам backend безопаснее оставить на `127.0.0.1:878
 `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` и запрет
 встраивания во frame.
 
-## Публикация через HTTPS
+## Голосовые модули
+
+TTS и STT не входят в обязательный runtime Ronix и по умолчанию отключены:
+
+```bash
+TTS_ENABLED=false
+TTS_PROVIDER=
+TTS_ENDPOINT=
+STT_ENABLED=false
+STT_PROVIDER=
+STT_ENDPOINT=
+```
+
+Если модуль включён, `PROVIDER` и `ENDPOINT` обязательны. Состояние конфигурации
+доступно через `GET /api/modules` и `GET /api/health`. Основной интерфейс,
+Codex-сессии и развёртывание не зависят от наличия голосовых моделей.
+Конкретные адаптеры Silero/Piper и Whisper будут отдельными runtime-модулями.
+
+## Ручная публикация через HTTPS
 
 Не открывайте порт `8787` напрямую в интернет. Оставьте Ronix на loopback-адресе
 и поставьте перед ним reverse proxy с HTTPS.
@@ -127,14 +176,20 @@ sudo systemctl reload caddy
 Caddy автоматически получает и обновляет TLS-сертификат. После этого интерфейс
 доступен по `https://ronix.example.com`.
 
-## Запуск через systemd
+## Ручной запуск через systemd
 
-Сначала соберите проект:
+Основной VDS-сценарий генерирует unit автоматически:
 
 ```bash
 npm ci
+npm run setup -- --mode vds
 npm run build
+sudo cp .ronix/ronix-agent.service /etc/systemd/system/ronix-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ronix-agent
 ```
+
+Ниже оставлен ручной unit для нестандартной раскладки каталогов.
 
 Пример `/etc/systemd/system/ronix-agent.service`:
 
@@ -150,16 +205,12 @@ User=ronix
 Group=ronix
 WorkingDirectory=/opt/ronix-agent
 Environment=NODE_ENV=production
-Environment=HOST=127.0.0.1
-Environment=PORT=8787
-Environment=DATA_DIR=/var/lib/ronix-agent
-Environment=PROJECT_ROOTS=/srv/ronix-projects
-Environment=CODEX_PATH=/usr/bin/codex
-Environment=TRUST_PROXY=true
+Environment=RONIX_CONFIG=/opt/ronix-agent/.env
 ExecStart=/usr/bin/node dist/src/server.js
 Restart=always
 RestartSec=3
 TimeoutStopSec=15
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
@@ -168,20 +219,8 @@ ProtectSystem=full
 WantedBy=multi-user.target
 ```
 
-Ключ лучше хранить отдельно от unit-файла:
-
-```bash
-KEY=$(openssl rand -hex 32)
-sudo mkdir -p /etc/systemd/system/ronix-agent.service.d
-printf '[Service]\nEnvironment=AGENT_KEY=%s\nEnvironment=AUTH_COOKIE_SECURE=true\nEnvironment=AUTH_SESSION_DAYS=30\n' "$KEY" |
-  sudo tee /etc/systemd/system/ronix-agent.service.d/auth.conf >/dev/null
-sudo chmod 600 /etc/systemd/system/ronix-agent.service.d/auth.conf
-sudo systemctl daemon-reload
-sudo systemctl enable --now ronix-agent
-printf 'Ключ доступа: %s\n' "$KEY"
-```
-
-Сохраните ключ в менеджере паролей. Не добавляйте `auth.conf` или сам ключ в Git.
+Сохраните выданный мастером ключ в менеджере паролей. Не добавляйте `.env` или
+сам ключ в Git.
 При перезапуске процесса активные cookie-сессии сбрасываются, после чего ключ
 нужно ввести повторно.
 
@@ -229,6 +268,7 @@ POST /api/auth/logout
 GET  /api/codex/usage
 GET  /api/codex/models
 GET  /api/health
+GET  /api/modules
 GET  /api/projects
 POST /api/projects
 GET  /api/sessions?projectId=...

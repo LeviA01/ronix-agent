@@ -1048,6 +1048,23 @@ textarea:focus {
   font-size: 12px;
 }
 
+.empty-action {
+  margin-top: 18px;
+  border: 1px solid rgb(110 231 168 / 28%);
+  border-radius: 10px;
+  padding: 9px 14px;
+  color: #092116;
+  background: var(--accent);
+  box-shadow: 0 8px 24px rgb(75 211 143 / 16%);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.empty-action:hover {
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
 .message {
   display: flex;
   width: 100%;

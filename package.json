@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "setup": "node --import tsx src/setup.ts",
+    "doctor": "node --import tsx src/doctor.ts",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
