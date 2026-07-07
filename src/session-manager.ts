@@ -10,6 +10,7 @@ import type {
   PendingApproval,
   SandboxMode,
   Session,
+  SessionPurpose,
   StoredEvent,
 } from "./types.js";
 
@@ -61,11 +62,13 @@ export class SessionManager {
   createSession(
     projectId: string,
     settings: { model?: string | null; reasoningEffort?: string | null } = {},
+    purpose: SessionPurpose = "general",
   ): Session {
     const now = new Date().toISOString();
     return this.store.createSession({
       id: randomUUID(),
       projectId,
+      purpose,
       threadId: null,
       activeTurnId: null,
       status: "ready",
@@ -76,6 +79,11 @@ export class SessionManager {
       createdAt: now,
       lastActivityAt: now,
     });
+  }
+
+  ensurePurposeSession(projectId: string, purpose: Exclude<SessionPurpose, "general">): Session {
+    return this.store.getSessionByPurpose(projectId, purpose)
+      ?? this.createSession(projectId, {}, purpose);
   }
 
   subscribe(sessionId: string, listener: EventListener): () => void {

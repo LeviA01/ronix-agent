@@ -1,5 +1,7 @@
 export type SessionStatus = "ready" | "running" | "stopped" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type ProjectKind = "dev" | "learning";
+export type SessionPurpose = "general" | "course" | "practice";
 
 export type ReasoningEffortOption = {
   reasoningEffort: string;
@@ -21,12 +23,14 @@ export type Project = {
   id: string;
   name: string;
   path: string;
+  kind: ProjectKind;
   createdAt: string;
 };
 
 export type Session = {
   id: string;
   projectId: string;
+  purpose: SessionPurpose;
   threadId: string | null;
   activeTurnId: string | null;
   status: SessionStatus;

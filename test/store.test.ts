@@ -12,10 +12,11 @@ test("persists projects, sessions, and ordered events", () => {
 
   try {
     const now = new Date().toISOString();
-    store.createProject({ id: "p1", name: "Test", path: "/tmp/test", createdAt: now });
+    store.createProject({ id: "p1", name: "Test", path: "/tmp/test", kind: "dev", createdAt: now });
     store.createSession({
       id: "s1",
       projectId: "p1",
+      purpose: "general",
       threadId: null,
       activeTurnId: null,
       status: "ready",
@@ -36,7 +37,9 @@ test("persists projects, sessions, and ordered events", () => {
     });
 
     assert.equal(store.getProject("p1")?.name, "Test");
+    assert.equal(store.getProject("p1")?.kind, "dev");
     assert.equal(store.getSession("s1")?.threadId, "thread-1");
+    assert.equal(store.getSession("s1")?.purpose, "general");
     assert.equal(store.getSession("s1")?.model, "gpt-5.5");
     assert.equal(store.getSession("s1")?.reasoningEffort, "high");
     assert.deepEqual(
@@ -69,10 +72,11 @@ test("recovers sessions left running after a process restart", () => {
   const store = new Store(directory);
   try {
     const now = new Date().toISOString();
-    store.createProject({ id: "p1", name: "Test", path: "/tmp/test", createdAt: now });
+    store.createProject({ id: "p1", name: "Test", path: "/tmp/test", kind: "dev", createdAt: now });
     store.createSession({
       id: "s1",
       projectId: "p1",
+      purpose: "general",
       threadId: "thread-1",
       activeTurnId: "turn-1",
       status: "running",
@@ -131,6 +135,8 @@ test("migrates sessions created by version 0.1", () => {
   const store = new Store(directory);
   try {
     const session = store.getSession("s1");
+    assert.equal(store.getProject("p1")?.kind, "dev");
+    assert.equal(session?.purpose, "general");
     assert.equal(session?.activeTurnId, null);
     assert.equal(session?.sandboxMode, "workspace-write");
     assert.equal(session?.model, null);

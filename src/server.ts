@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -16,7 +23,15 @@ import { moduleStatuses } from "./modules.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
-import type { CodexModel, SandboxMode, StoredEvent } from "./types.js";
+import type {
+  CodexModel,
+  Project,
+  ProjectKind,
+  SandboxMode,
+  Session,
+  SessionPurpose,
+  StoredEvent,
+} from "./types.js";
 
 type Config = typeof defaultConfig;
 
@@ -40,6 +55,7 @@ const SANDBOX_MODES = new Set<SandboxMode>([
   "workspace-write",
   "danger-full-access",
 ]);
+const PROJECT_KINDS = new Set<ProjectKind>(["dev", "learning"]);
 
 export function createApplication(options: ApplicationOptions = {}): Application {
   const config = options.config ?? defaultConfig;
@@ -86,6 +102,13 @@ export function createApplication(options: ApplicationOptions = {}): Application
         modelPending = null;
       });
     return modelPending;
+  }
+
+  function ensureLearningSessions(projectId: string): LearningSessions {
+    return {
+      course: sessions.ensurePurposeSession(projectId, "course"),
+      practice: sessions.ensurePurposeSession(projectId, "practice"),
+    };
   }
 
   async function handleApi(
@@ -167,8 +190,14 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
 
     if (request.method === "POST" && url.pathname === "/api/projects") {
-      const body = await readJson<{ name?: unknown; path?: unknown; create?: unknown }>(request);
+      const body = await readJson<{
+        name?: unknown;
+        path?: unknown;
+        create?: unknown;
+        kind?: unknown;
+      }>(request);
       const requestedPath = requireString(body.path, "path");
+      const kind = projectKind(body.kind);
       const resolution = await resolveProjectPath(requestedPath, config.projectRoots);
       if (!resolution.exists && body.create !== true) {
         json(response, 409, {
@@ -190,13 +219,48 @@ export function createApplication(options: ApplicationOptions = {}): Application
           id: randomUUID(),
           name,
           path,
+          kind,
           createdAt: new Date().toISOString(),
         });
+        if (project.kind === "learning") {
+          ensureLearningWorkspace(project.path);
+          ensureLearningSessions(project.id);
+        }
         json(response, 201, { project });
       } catch (error) {
         if (isSqliteConstraint(error)) throw new HttpError(409, "Project is already registered");
         throw error;
       }
+      return true;
+    }
+
+    if (
+      request.method === "POST"
+      && parts[1] === "projects"
+      && parts[2]
+      && parts[3] === "learning"
+      && parts[4] === "enable"
+    ) {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      ensureLearningWorkspace(project.path);
+      const updated = project.kind === "learning"
+        ? project
+        : store.updateProjectKind(project.id, "learning");
+      json(response, 200, {
+        project: updated,
+        learning: readLearningWorkspace(updated, ensureLearningSessions(updated.id)),
+      });
+      return true;
+    }
+
+    if (request.method === "GET" && parts[1] === "projects" && parts[2] && parts[3] === "learning") {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      const purposeSessions = project.kind === "learning"
+        ? ensureLearningSessions(project.id)
+        : undefined;
+      json(response, 200, readLearningWorkspace(project, purposeSessions));
       return true;
     }
 
@@ -555,6 +619,14 @@ function optionalString(value: unknown, name: string): string | undefined {
   return value.trim();
 }
 
+function projectKind(value: unknown): ProjectKind {
+  if (value === undefined || value === null || value === "") return "dev";
+  if (typeof value !== "string" || !PROJECT_KINDS.has(value as ProjectKind)) {
+    throw new HttpError(400, "Invalid project kind");
+  }
+  return value as ProjectKind;
+}
+
 function resolveModelSettings(
   models: CodexModel[],
   currentModel: string | null,
@@ -596,6 +668,363 @@ function sessionHttpError(error: unknown): HttpError {
 
 function isSqliteConstraint(error: unknown): boolean {
   return error instanceof Error && /constraint/i.test(error.message);
+}
+
+type LearningTopic = {
+  title: string;
+  score: number;
+  confidence: string;
+  rationale: string;
+};
+
+type LearningAssignment = {
+  title: string;
+  score: number | null;
+};
+
+type LearningSessions = {
+  course: Session;
+  practice: Session;
+};
+
+const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-наставника
+
+## Роль
+
+Ты работаешь внутри учебного проекта Ronix. Проект создан не для обычной разработки,
+а для обучения пользователя через два долгоживущих диалога: курс и практика.
+
+## Правила владения файлами
+
+1. Ученик не редактирует оценки, дневник и маршрут вручную.
+2. Codex ведет \`learning/LEARNING_DIARY.md\` и \`learning/ROADMAP.md\`.
+3. UI Ronix только показывает состояние этих файлов.
+4. Учебные записи ведутся на русском языке.
+
+## Первый учебный диалог
+
+Если дневник и roadmap еще не заполнены по смыслу, сначала уточни:
+
+- цель обучения;
+- текущий уровень;
+- удобный формат практики;
+- ограничения по времени и темпу;
+- какие прежние материалы или дневник нужно импортировать.
+
+После этого заполни начальные \`LEARNING_DIARY.md\` и \`ROADMAP.md\`.
+
+## Курс
+
+В режиме курса объясняй темы, выбирай следующий блок по \`ROADMAP.md\`, задавай
+короткие проверочные вопросы и корректируй маршрут, если он устарел. Если меняешь
+roadmap, добавляй краткое основание в сам файл.
+
+## Практика
+
+В режиме практики пользователь сдает код обычным сообщением. Проверяй решение,
+задавай уточняющие вопросы, оценивай самостоятельность и после завершенной
+практики обновляй \`LEARNING_DIARY.md\`: оценку задания, затронутые темы,
+основания и текущий фокус.
+
+## Оценивание
+
+Одна опечатка не снижает оценку. Повторяющаяся концептуальная ошибка может
+снизить ее. Полностью сгенерированный AI-код не подтверждает владение темой.
+Обычное новое свидетельство меняет тематическую оценку не более чем на 1 балл,
+контрольная или крупная самостоятельная работа - не более чем на 2 балла.
+`;
+
+const LEARNING_DIARY_TEMPLATE = `# Учебный дневник
+
+Последнее обновление: пока не заполнено
+
+## Цель обучения
+
+Пока не уточнена.
+
+## Шкала владения темой
+
+| Балл | Наблюдаемый уровень |
+|---:|---|
+| 1 | Назначение темы пока не понятно |
+| 2 | Ученик узнает термин, но не применяет его |
+| 3 | Выполняет действие по точной инструкции |
+| 4 | Решает задачу с существенными подсказками |
+| 5 | Самостоятельно решает базовые задачи |
+| 6 | Учитывает типичные ошибки и крайние случаи |
+| 7 | Комбинирует тему с другими и в основном самостоятельно отлаживает |
+| 8 | Пишет надежно и объясняет принятые решения |
+| 9 | Решает незнакомые задачи и аргументированно сравнивает подходы |
+| 10 | Стабильно владеет темой в крупных проектах и может обучать ей |
+
+## Методика оценки заданий
+
+| Критерий | Вес |
+|---|---:|
+| Корректность | 25% |
+| Выполнение требований | 15% |
+| Обработка ошибок | 15% |
+| Структура решения | 15% |
+| Читаемость | 10% |
+| Понимание своего кода | 10% |
+| Самостоятельность | 10% |
+
+## Текущая карта знаний
+
+| Тема или подтема | Балл | Уверенность | Последнее основание |
+|---|---:|---|---|
+
+## Журнал заданий
+
+Завершенных заданий пока нет.
+
+## Текущий учебный фокус
+
+1. Уточнить цель, уровень и формат практики.
+`;
+
+const LEARNING_ROADMAP_TEMPLATE = `# Дорожная карта
+
+## Сейчас
+
+- [ ] Уточнить цель обучения, уровень и формат практики.
+- [ ] Импортировать или кратко описать предыдущий учебный опыт.
+
+## Следующие шаги
+
+- [ ] Составить первый короткий блок теории.
+- [ ] Дать первое самостоятельное практическое задание.
+- [ ] Обновить дневник после первой завершенной практики.
+
+## Позже
+
+- [ ] Провести контрольную работу после нескольких обычных заданий.
+- [ ] Пересмотреть маршрут по результатам дневника.
+
+## История корректировок
+
+- Пока нет.
+`;
+
+function ensureLearningWorkspace(projectPath: string): void {
+  const learningRoot = join(projectPath, "learning");
+  mkdirSync(learningRoot, { recursive: true });
+  writeTemplateIfMissing(join(learningRoot, "AGENTS.md"), LEARNING_AGENTS_TEMPLATE);
+  writeTemplateIfMissing(join(learningRoot, "LEARNING_DIARY.md"), LEARNING_DIARY_TEMPLATE);
+  writeTemplateIfMissing(join(learningRoot, "ROADMAP.md"), LEARNING_ROADMAP_TEMPLATE);
+}
+
+function writeTemplateIfMissing(path: string, content: string): void {
+  if (existsSync(path)) return;
+  writeFileSync(path, content, "utf8");
+}
+
+function readLearningWorkspace(project: Project, purposeSessions?: LearningSessions): {
+  kind: ProjectKind;
+  available: boolean;
+  source: "learning" | "examples" | null;
+  root: string | null;
+  agentsPath: string | null;
+  diaryPath: string | null;
+  roadmapPath: string | null;
+  agents: string;
+  diary: string;
+  roadmap: string;
+  summary: ReturnType<typeof summarizeDiary>;
+  diarySummary: ReturnType<typeof summarizeDiary>;
+  roadmapSummary: ReturnType<typeof summarizeRoadmap>;
+  sessions: LearningSessions | null;
+  missing: string[];
+} {
+  const learningRoot = join(project.path, "learning");
+  const examplesRoot = join(project.path, "examples");
+  const candidates = [
+    { source: "learning" as const, root: learningRoot, prefix: "learning/", files: ["AGENTS.md", "LEARNING_DIARY.md", "ROADMAP.md"] },
+    { source: "examples" as const, root: examplesRoot, prefix: "examples/", files: ["AGENTS.md", "LEARNING_DIARY.md"] },
+  ];
+  const found = candidates.find((candidate) =>
+    candidate.files.every((file) => existsSync(join(candidate.root, file)))
+  );
+  const root = found?.root ?? null;
+  const agentsPath = root ? join(root, "AGENTS.md") : null;
+  const diaryPath = root ? join(root, "LEARNING_DIARY.md") : null;
+  const roadmapPath = root && existsSync(join(root, "ROADMAP.md"))
+    ? join(root, "ROADMAP.md")
+    : null;
+  const agents = agentsPath ? readUtf8File(agentsPath) : "";
+  const diary = diaryPath ? readUtf8File(diaryPath) : "";
+  const roadmap = roadmapPath ? readUtf8File(roadmapPath) : "";
+  const expectedRoot = existsSync(learningRoot) || project.kind === "learning"
+    ? { root: learningRoot, prefix: "learning/" }
+    : { root: examplesRoot, prefix: "examples/" };
+  const missing = ["AGENTS.md", "LEARNING_DIARY.md", "ROADMAP.md"]
+    .filter((file) => !existsSync(join(expectedRoot.root, file)))
+    .map((file) => `${expectedRoot.prefix}${file}`);
+  const diarySummary = summarizeDiary(diary);
+  return {
+    kind: project.kind,
+    available: Boolean(root),
+    source: found?.source ?? null,
+    root,
+    agentsPath: found ? `${found.prefix}AGENTS.md` : null,
+    diaryPath: found ? `${found.prefix}LEARNING_DIARY.md` : null,
+    roadmapPath: found && roadmapPath ? `${found.prefix}ROADMAP.md` : null,
+    agents,
+    diary,
+    roadmap,
+    summary: diarySummary,
+    diarySummary,
+    roadmapSummary: summarizeRoadmap(roadmap),
+    sessions: purposeSessions ?? null,
+    missing,
+  };
+}
+
+function readUtf8File(path: string): string {
+  const size = statSync(path).size;
+  if (size > 1_000_000) throw new HttpError(413, "Learning file is too large");
+  return readFileSync(path, "utf8");
+}
+
+function summarizeDiary(diary: string): {
+  lastUpdated: string | null;
+  topicCount: number;
+  assignmentCount: number;
+  focus: string[];
+  latestGrades: LearningAssignment[];
+  averageScore: number | null;
+  topics: LearningTopic[];
+  weakTopics: LearningTopic[];
+  strongTopics: LearningTopic[];
+  assignments: LearningAssignment[];
+} {
+  const lastUpdated = diary.match(/^Последнее обновление:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  const topics = parseKnowledgeTopics(markdownSection(diary, "## Текущая карта знаний"));
+  const assignments = parseAssignments(markdownSection(diary, "## Журнал заданий"));
+  const focus = markdownSection(diary, "## Текущий учебный фокус")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s*(?:\d+\.|-)\s+(?:\[[ xX]\]\s*)?(.+)$/)?.[1]?.trim())
+    .filter((value): value is string => Boolean(value));
+  const averageScore = topics.length
+    ? Math.round((topics.reduce((sum, topic) => sum + topic.score, 0) / topics.length) * 10) / 10
+    : null;
+  return {
+    lastUpdated,
+    topicCount: topics.length,
+    assignmentCount: assignments.length,
+    focus,
+    latestGrades: assignments.filter((assignment) => assignment.score != null).slice(-6),
+    averageScore,
+    topics,
+    weakTopics: [...topics].sort((a, b) => a.score - b.score).slice(0, 6),
+    strongTopics: [...topics].sort((a, b) => b.score - a.score).slice(0, 6),
+    assignments,
+  };
+}
+
+function summarizeRoadmap(roadmap: string): {
+  currentStage: string | null;
+  current: Array<{ title: string; done: boolean }>;
+  nextSteps: Array<{ title: string; done: boolean }>;
+  later: Array<{ title: string; done: boolean }>;
+  completed: string[];
+} {
+  const current = parseChecklist(markdownSection(roadmap, "## Сейчас"));
+  const nextSteps = parseChecklist(markdownSection(roadmap, "## Следующие шаги"));
+  const later = parseChecklist(markdownSection(roadmap, "## Позже"));
+  const completed = [...current, ...nextSteps, ...later]
+    .filter((item) => item.done)
+    .map((item) => item.title);
+  const currentStage = current.find((item) => !item.done)?.title
+    ?? nextSteps.find((item) => !item.done)?.title
+    ?? completed.at(-1)
+    ?? null;
+  return {
+    currentStage,
+    current,
+    nextSteps,
+    later,
+    completed,
+  };
+}
+
+function parseChecklist(section: string): Array<{ title: string; done: boolean }> {
+  return section
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^\s*-\s+\[([ xX])\]\s+(.+)$/);
+      if (!match) return null;
+      return {
+        title: stripMarkdown(match[2] ?? ""),
+        done: (match[1] ?? "").toLowerCase() === "x",
+      };
+    })
+    .filter((value): value is { title: string; done: boolean } => Boolean(value));
+}
+
+function parseKnowledgeTopics(section: string): LearningTopic[] {
+  const topics = [];
+  for (const line of section.split(/\r?\n/)) {
+    const cells = tableCells(line);
+    if (
+      cells.length < 4
+      || cells[0] === "Тема или подтема"
+      || /^-+$/.test(cells[0] ?? "")
+    ) {
+      continue;
+    }
+    const score = Number.parseInt(cells[1] ?? "", 10);
+    if (!cells[0] || !Number.isInteger(score)) continue;
+    topics.push({
+      title: stripMarkdown(cells[0]),
+      score,
+      confidence: cells[2] ?? "",
+      rationale: stripMarkdown(cells.slice(3).join(" | ")),
+    });
+  }
+  return topics;
+}
+
+function parseAssignments(section: string): Array<{ title: string; score: number | null }> {
+  const headings = [...section.matchAll(/^###\s+(.+)$/gm)];
+  return headings.map((heading, index) => {
+    const start = (heading.index ?? 0) + heading[0].length;
+    const end = headings[index + 1]?.index ?? section.length;
+    const body = section.slice(start, end);
+    const scores = [...body.matchAll(
+      /(?:Итоговая оценка(?: первой сдачи)?|Текущая оценка после доработки):\s*([\d.]+)\/10/gi,
+    )];
+    const score = scores.at(-1)?.[1];
+    return {
+      title: stripMarkdown(heading[1]?.trim() ?? "Задание"),
+      score: score ? Number.parseFloat(score) : null,
+    };
+  });
+}
+
+function tableCells(line: string): string[] {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return [];
+  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+}
+
+function stripMarkdown(value: string): string {
+  return value
+    .replace(/\\\|/g, "|")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function markdownSection(markdown: string, heading: string): string {
+  const start = markdown.indexOf(heading);
+  if (start < 0) return "";
+  const afterHeading = start + heading.length;
+  const next = markdown.slice(afterHeading).search(/\n##\s+/);
+  return next < 0
+    ? markdown.slice(afterHeading)
+    : markdown.slice(afterHeading, afterHeading + next);
 }
 
 async function main(): Promise<void> {

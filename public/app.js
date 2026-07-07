@@ -28,6 +28,9 @@ const state = {
   liveRenderFrame: null,
   selectedSession: null,
   showTechnical: localStorage.getItem("ronix-agent-technical") === "true",
+  learningMode: localStorage.getItem("ronix-agent-learning-mode") || "course",
+  progressTab: localStorage.getItem("ronix-agent-progress-tab") || "summary",
+  learning: null,
   drafts: loadStoredJson("ronix-agent-drafts", {}),
   navigation: loadStoredJson("ronix-agent-navigation", {
     projectId: null,
@@ -236,7 +239,11 @@ async function loadProjects() {
     ? `Будет найдено или создано в ${projectRoots[0]}`
     : "Корневая папка проектов не настроена";
   $("#project").innerHTML = projects
-    .map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
+    .map((project) => `
+      <option value="${project.id}">${escapeHtml(
+        project.kind === "learning" ? `${project.name} · учёба` : project.name,
+      )}</option>
+    `)
     .join("");
   const rememberedProject = projects.find(
     (project) => project.id === state.navigation.projectId,
@@ -260,13 +267,45 @@ async function loadModels() {
 
 async function loadSessions() {
   const projectId = $("#project").value;
+  const project = selectedProject();
   if (!projectId) {
     state.sessions = [];
+    state.learning = null;
     renderSessions();
     renderSessionMeta(null);
     renderEvents();
     return;
   }
+  if (project?.kind === "learning") {
+    await loadLearning(projectId);
+    state.sessions = [
+      state.learning?.sessions?.course,
+      state.learning?.sessions?.practice,
+    ].filter(Boolean);
+    renderSessions();
+    if (!["course", "practice", "progress"].includes(state.learningMode)) {
+      state.learningMode = "course";
+    }
+    if (state.learningMode === "progress") {
+      clearSelectedSessionForProgress();
+      renderLearningProgressMode();
+      return;
+    }
+    const purposeSession = state.learning?.sessions?.[state.learningMode];
+    if (purposeSession) {
+      if (state.sessionId === purposeSession.id) {
+        state.selectedSession = purposeSession;
+        renderSessionMeta(purposeSession);
+      } else {
+        await selectSession(purposeSession.id);
+      }
+    } else {
+      renderSessionMeta(null);
+      renderEvents();
+    }
+    return;
+  }
+  state.learning = null;
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
   state.sessions = sessions;
   renderSessions();
@@ -284,6 +323,197 @@ async function loadSessions() {
       renderEvents();
     }
   }
+}
+
+async function loadLearning(projectId = $("#project").value) {
+  if (!projectId) {
+    state.learning = null;
+    return null;
+  }
+  try {
+    state.learning = await api(`/api/projects/${encodeURIComponent(projectId)}/learning`);
+    return state.learning;
+  } catch (error) {
+    state.learning = { available: false, error: error.message, missing: [] };
+    return state.learning;
+  }
+}
+
+function selectedProject() {
+  return state.projects.find((project) => project.id === $("#project").value) ?? null;
+}
+
+function isLearningProject() {
+  return selectedProject()?.kind === "learning";
+}
+
+function renderLearningDashboard() {
+  const learning = state.learning;
+  if (!learning) {
+    return '<div class="empty-state"><div class="empty-icon">›_</div><h3>Загрузка учёбы</h3></div>';
+  }
+  if (!learning.available) {
+    return `
+      <section class="learning-dashboard">
+        <header class="learning-dashboard-head">
+          <div>
+            <h3>Учебные файлы не найдены</h3>
+            <p>${escapeHtml(learning.error || `Не найдены: ${(learning.missing ?? []).join(", ")}`)}</p>
+          </div>
+          <button type="button" class="refresh-learning" data-refresh-learning>Обновить прогресс</button>
+        </header>
+      </section>
+    `;
+  }
+  const diary = learning.diarySummary ?? learning.summary ?? {};
+  const roadmap = learning.roadmapSummary ?? {};
+  const showingRaw = state.progressTab !== "summary";
+  return `
+    <section class="learning-dashboard">
+      <header class="learning-dashboard-head">
+        <div>
+          <h3>Успехи</h3>
+          <p>${escapeHtml(learningSummaryLine(diary, roadmap))}</p>
+        </div>
+        <button type="button" class="refresh-learning" data-refresh-learning>Обновить прогресс</button>
+      </header>
+      <div class="learning-tabs" role="tablist">
+        ${renderProgressTab("summary", "Обзор")}
+        ${renderProgressTab("diary", "Дневник")}
+        ${renderProgressTab("roadmap", "Roadmap")}
+      </div>
+      ${showingRaw
+        ? `<pre class="learning-content">${escapeHtml(
+            state.progressTab === "roadmap" ? learning.roadmap : learning.diary,
+          )}</pre>`
+        : renderLearningSummary(diary, roadmap)}
+    </section>
+  `;
+}
+
+function renderProgressTab(tab, label) {
+  return `
+    <button
+      type="button"
+      data-progress-tab="${escapeHtml(tab)}"
+      class="${state.progressTab === tab ? "active" : ""}"
+    >${escapeHtml(label)}</button>
+  `;
+}
+
+function learningSummaryLine(diary, roadmap) {
+  const focus = diary.focus?.[0] ? ` · ${diary.focus[0]}` : "";
+  return [
+    diary.topicCount != null ? `${diary.topicCount} тем` : null,
+    diary.assignmentCount != null ? `${diary.assignmentCount} заданий` : null,
+    roadmap.currentStage ? `сейчас: ${roadmap.currentStage}` : null,
+    diary.lastUpdated ? `обновлено ${diary.lastUpdated}` : null,
+  ].filter(Boolean).join(" · ") + focus;
+}
+
+function renderLearningSummary(diary, roadmap) {
+  const weakTopics = diary.weakTopics ?? [];
+  const strongTopics = diary.strongTopics ?? [];
+  const topics = diary.topics ?? [];
+  const assignments = diary.latestGrades ?? [];
+  return `
+    <section class="learning-scoreboard">
+      <div class="learning-stat">
+        <span>Средний уровень</span>
+        <strong>${diary.averageScore ?? "—"}</strong>
+      </div>
+      <div class="learning-stat">
+        <span>Темы</span>
+        <strong>${diary.topicCount ?? 0}</strong>
+      </div>
+      <div class="learning-stat">
+        <span>Задания</span>
+        <strong>${diary.assignmentCount ?? 0}</strong>
+      </div>
+    </section>
+    ${renderRoadmapSummary(roadmap)}
+    ${renderFocus(diary.focus ?? [])}
+    ${renderTopicGroup("Что проседает", weakTopics, "weak")}
+    ${renderTopicGroup("Сильные стороны", strongTopics, "strong")}
+    ${renderAssignmentScores(assignments)}
+    ${renderTopicGroup("Все темы", topics, "all")}
+  `;
+}
+
+function renderRoadmapSummary(roadmap) {
+  const next = [
+    ...(roadmap.current ?? []).filter((item) => !item.done),
+    ...(roadmap.nextSteps ?? []).filter((item) => !item.done),
+  ].slice(0, 5);
+  if (!roadmap.currentStage && next.length === 0) return "";
+  return `
+    <section class="learning-section">
+      <h3>Маршрут</h3>
+      ${roadmap.currentStage ? `<p class="learning-current-stage">${escapeHtml(roadmap.currentStage)}</p>` : ""}
+      ${next.length ? `
+        <ol class="learning-focus">
+          ${next.map((item) => `<li>${escapeHtml(item.title)}</li>`).join("")}
+        </ol>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderFocus(focus) {
+  if (!focus.length) return "";
+  return `
+    <section class="learning-section">
+      <h3>Текущий фокус</h3>
+      <ol class="learning-focus">
+        ${focus.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ol>
+    </section>
+  `;
+}
+
+function renderTopicGroup(title, topics, tone) {
+  if (!topics.length) return "";
+  return `
+    <section class="learning-section">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="learning-topic-list ${tone}">
+        ${topics.map(renderTopic).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTopic(topic) {
+  const score = Math.max(1, Math.min(10, Number(topic.score) || 1));
+  return `
+    <article class="learning-topic">
+      <div class="learning-topic-head">
+        <strong>${escapeHtml(topic.title)}</strong>
+        <span>${score}/10</span>
+      </div>
+      <div class="learning-meter" aria-hidden="true">
+        <span style="width: ${score * 10}%"></span>
+      </div>
+      <p>${escapeHtml(topic.rationale || topic.confidence || "")}</p>
+    </article>
+  `;
+}
+
+function renderAssignmentScores(assignments) {
+  if (!assignments.length) return "";
+  return `
+    <section class="learning-section">
+      <h3>Последние оценки</h3>
+      <div class="learning-assignment-list">
+        ${assignments.map((assignment) => `
+          <div class="learning-assignment">
+            <span>${escapeHtml(assignment.title)}</span>
+            <strong>${assignment.score}/10</strong>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function rememberProject(projectId) {
@@ -306,7 +536,23 @@ function forgetSession(projectId) {
 }
 
 function renderSessions() {
-  $("#session-count").textContent = String(state.sessions.length);
+  const learning = isLearningProject();
+  chat.classList.remove("learning-project");
+  $("#sessions-label").textContent = learning ? "Учёба" : "Сессии";
+  $("#session-count").textContent = learning ? "3" : String(state.sessions.length);
+  $("#new-session").hidden = learning;
+  $("#enable-learning").hidden = !selectedProject() || learning;
+  if (learning) {
+    $("#sessions").innerHTML = `
+      ${renderLearningModeButton("course", "Курс", "Теория, объяснения и движение по ROADMAP")}
+      ${renderLearningModeButton("practice", "Практика", "Сдача кода сообщением, ревью и дневник")}
+      ${renderLearningModeButton("progress", "Успехи", "Дневник и дорожная карта только для чтения")}
+    `;
+    document.querySelectorAll("[data-learning-mode]").forEach((button) => {
+      button.addEventListener("click", () => void selectLearningMode(button.dataset.learningMode));
+    });
+    return;
+  }
   $("#sessions").innerHTML = state.sessions
     .map(
       (session) => `
@@ -374,6 +620,39 @@ function renderSessions() {
       void changeSessionState(button.dataset.resumeId, "resume");
     });
   });
+}
+
+function renderLearningModeButton(mode, title, description) {
+  const session = mode === "progress" ? null : state.learning?.sessions?.[mode];
+  const status = session?.status ?? "ready";
+  return `
+    <button
+      class="learning-mode ${state.learningMode === mode ? "active" : ""}"
+      type="button"
+      data-learning-mode="${escapeHtml(mode)}"
+    >
+      <span class="session-status ${escapeHtml(status)}"></span>
+      <span>
+        <span class="session-title">${escapeHtml(title)}</span>
+        <small>${escapeHtml(description)}</small>
+      </span>
+    </button>
+  `;
+}
+
+async function selectLearningMode(mode) {
+  if (!["course", "practice", "progress"].includes(mode)) return;
+  saveCurrentDraft();
+  state.learningMode = mode;
+  localStorage.setItem("ronix-agent-learning-mode", mode);
+  renderSessions();
+  if (mode === "progress") {
+    clearSelectedSessionForProgress();
+    renderLearningProgressMode();
+    return;
+  }
+  const session = state.learning?.sessions?.[mode];
+  if (session) await selectSession(session.id);
 }
 
 function toggleSessionMenu(id) {
@@ -505,12 +784,18 @@ function renderSessionMeta(session) {
   $("#session-title").textContent = sessionTitle(session);
   meta.className = `session-meta ${session.status}`;
   const thread = session.threadId ? ` · ${session.threadId.slice(0, 8)}` : "";
+  const learning = isLearningProject();
   meta.innerHTML = `
     <span class="session-meta-dot"></span>
-    <span>${escapeHtml(statusLabel(session.status) + thread)}</span>
+    <span>${escapeHtml(statusLabel(session.status) + (learning ? "" : thread))}</span>
   `;
   $("#send").disabled = session.status === "running" || session.status === "stopped";
   $("#prompt-form").hidden = false;
+  $("#prompt").placeholder = learning
+    ? session.purpose === "practice"
+      ? "Отправьте код или вопрос по практике…"
+      : "Спросите тему или продолжите курс…"
+    : "Напишите задачу для Codex…";
   $("#interrupt").disabled = session.status !== "running";
   $("#interrupt").hidden = session.status !== "running";
   const sandbox = $("#sandbox-mode");
@@ -727,6 +1012,13 @@ function handleEvent(event, initial = false) {
     appendVisibleEvent(event);
   }
   if (isSessionStateEvent(event)) scheduleSessionRefresh();
+  if (
+    isLearningProject()
+    && ["course", "practice"].includes(state.learningMode)
+    && event.type === "codex.turn.completed"
+  ) {
+    void loadLearning();
+  }
   if (initial && state.events.length === 200) {
     state.hasMoreEvents = true;
     renderEvents();
@@ -736,21 +1028,43 @@ function handleEvent(event, initial = false) {
 function renderEvents(scrollToBottom = true) {
   const container = $("#events");
   container.innerHTML = "";
+  if (isLearningProject() && state.learningMode === "progress") {
+    container.innerHTML = renderLearningDashboard();
+    container.querySelector("[data-refresh-learning]")?.addEventListener("click", async () => {
+      await loadLearning();
+      renderLearningProgressMode();
+    });
+    container.querySelectorAll("[data-progress-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.progressTab = button.dataset.progressTab;
+        localStorage.setItem("ronix-agent-progress-tab", state.progressTab);
+        renderEvents(false);
+      });
+    });
+    return;
+  }
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
   const hasApprovals = Object.keys(state.approvals).length > 0;
   if (events.length === 0 && !hasApprovals) {
     const hasProject = Boolean($("#project").value);
     const hasSessions = state.sessions.length > 0;
+    const learning = isLearningProject();
     const emptyTitle = state.sessionId
-      ? "Начните диалог"
+      ? learning && state.learningMode === "practice" ? "Начните практику" : "Начните диалог"
       : !hasProject
         ? "Добавьте проект"
-        : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
+        : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
-      ? "Опишите задачу в поле ниже."
+      ? learning && state.learningMode === "practice"
+        ? "Отправьте код или вопрос по заданию в поле ниже."
+        : learning
+          ? "Продолжите курс в поле ниже."
+          : "Опишите задачу в поле ниже."
       : !hasProject
         ? "Укажите каталог проекта в боковой панели."
-        : hasSessions
+        : learning
+          ? "Курс и практика сохраняются в отдельных долгоживущих сессиях."
+          : hasSessions
           ? "Выберите существующую сессию в боковой панели."
           : "Создайте первую сессию, чтобы начать работу с Codex.";
     container.innerHTML = `
@@ -758,7 +1072,7 @@ function renderEvents(scrollToBottom = true) {
         <div class="empty-icon">›_</div>
         <h3>${emptyTitle}</h3>
         <p>${emptyDescription}</p>
-        ${hasProject && !hasSessions
+        ${hasProject && !hasSessions && !learning
           ? '<button class="empty-action" type="button" data-create-session>Создать сессию</button>'
           : ""}
       </div>
@@ -1269,6 +1583,20 @@ async function refreshSelectedSession() {
   if (!state.sessionId) return;
   const { session } = await api(`/api/sessions/${state.sessionId}`);
   renderSessionMeta(session);
+  if (isLearningProject()) {
+    const purpose = session.purpose;
+    if (purpose === "course" || purpose === "practice") {
+      state.learning ??= {};
+      state.learning.sessions ??= {};
+      state.learning.sessions[purpose] = session;
+      state.sessions = [
+        state.learning.sessions.course,
+        state.learning.sessions.practice,
+      ].filter(Boolean);
+      renderSessions();
+      return;
+    }
+  }
   await loadSessions();
 }
 
@@ -1330,6 +1658,48 @@ function resetProjectSessionView() {
   renderEvents();
 }
 
+function clearSelectedSessionForProgress() {
+  state.source?.close();
+  state.source = null;
+  clearTimeout(state.reconnectTimer);
+  clearTimeout(state.sessionRefreshTimer);
+  if (state.liveRenderFrame) cancelAnimationFrame(state.liveRenderFrame);
+  state.reconnectTimer = null;
+  state.sessionRefreshTimer = null;
+  state.liveRenderFrame = null;
+  state.sessionId = null;
+  state.events = [];
+  state.lastSequence = 0;
+  state.firstSequence = 0;
+  state.hasMoreEvents = false;
+  state.approvals = {};
+  state.liveTurnActive = false;
+  state.liveResponse = null;
+  state.selectedSession = null;
+  promptInput.value = "";
+  resizePrompt();
+}
+
+function renderLearningProgressMode() {
+  $("#session-title").textContent = "Успехи";
+  const meta = $("#session-meta");
+  meta.className = "session-meta ready";
+  meta.innerHTML = `
+    <span class="session-meta-dot"></span>
+    <span>${escapeHtml(learningSummaryLine(
+      state.learning?.diarySummary ?? {},
+      state.learning?.roadmapSummary ?? {},
+    ) || "Дневник и дорожная карта")}</span>
+  `;
+  $("#session-settings").hidden = true;
+  $("#toggle-settings").hidden = true;
+  $("#interrupt").hidden = true;
+  $("#prompt-form").hidden = true;
+  $("#send").disabled = true;
+  $("#sandbox-mode").disabled = true;
+  renderEvents();
+}
+
 $("#project").addEventListener("change", async () => {
   saveCurrentDraft();
   resetProjectSessionView();
@@ -1377,10 +1747,10 @@ function closeCreateProject() {
   state.pendingProject = null;
 }
 
-async function addProject(folder, create = false) {
+async function addProject(folder, create = false, kind = "dev") {
   const { project } = await api("/api/projects", {
     method: "POST",
-    body: JSON.stringify({ path: folder, create }),
+    body: JSON.stringify({ path: folder, create, kind }),
   });
   $("#project-form").reset();
   saveCurrentDraft();
@@ -1404,12 +1774,13 @@ async function addProject(folder, create = false) {
 $("#project-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const folder = $("#project-folder").value.trim();
+  const kind = $("#project-kind-learning").checked ? "learning" : "dev";
   if (!folder) return;
   try {
-    await addProject(folder);
+    await addProject(folder, false, kind);
   } catch (error) {
     if (error.code === "PROJECT_NOT_FOUND") {
-      state.pendingProject = folder;
+      state.pendingProject = { folder, kind };
       $("#create-project-path").textContent = error.path;
       createProjectModal.hidden = false;
       return;
@@ -1427,11 +1798,29 @@ $("#confirm-create-project").addEventListener("click", async () => {
   const button = $("#confirm-create-project");
   button.disabled = true;
   try {
-    await addProject(state.pendingProject, true);
+    await addProject(state.pendingProject.folder, true, state.pendingProject.kind);
   } catch (error) {
     alert(error.message);
   } finally {
     button.disabled = false;
+  }
+});
+
+$("#enable-learning").addEventListener("click", async () => {
+  const project = selectedProject();
+  if (!project || project.kind === "learning") return;
+  try {
+    const { project: updated, learning } = await api(
+      `/api/projects/${encodeURIComponent(project.id)}/learning/enable`,
+      { method: "POST" },
+    );
+    state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
+    state.learning = learning;
+    state.learningMode = "course";
+    localStorage.setItem("ronix-agent-learning-mode", state.learningMode);
+    await loadProjects();
+  } catch (error) {
+    alert(error.message);
   }
 });
 
@@ -1487,8 +1876,23 @@ promptInput.addEventListener("keydown", (event) => {
 });
 
 function resizePrompt() {
-  promptInput.style.height = "auto";
-  promptInput.style.height = `${Math.min(promptInput.scrollHeight, 180)}px`;
+  const form = $("#prompt-form");
+  const style = getComputedStyle(promptInput);
+  const minHeight = Number.parseFloat(style.minHeight) || 44;
+  const maxHeight = Number.parseFloat(style.maxHeight) || 180;
+  if (form.hidden) {
+    promptInput.style.height = `${minHeight}px`;
+    return;
+  }
+  if (!promptInput.value) {
+    promptInput.style.height = `${minHeight}px`;
+    return;
+  }
+  promptInput.style.height = `${minHeight}px`;
+  promptInput.style.height = `${Math.max(
+    minHeight,
+    Math.min(promptInput.scrollHeight, maxHeight),
+  )}px`;
 }
 
 function saveCurrentDraft() {
@@ -1529,6 +1933,8 @@ $("#interrupt").addEventListener("click", async () => {
 });
 
 function sessionTitle(session) {
+  if (session.purpose === "course") return "Курс";
+  if (session.purpose === "practice") return "Практика";
   return `Сессия ${session.id.slice(0, 8)}`;
 }
 

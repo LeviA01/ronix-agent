@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   Project,
+  ProjectKind,
   SandboxMode,
   Session,
+  SessionPurpose,
   SessionStatus,
   StoredEvent,
 } from "./types.js";
@@ -13,12 +15,14 @@ type ProjectRow = {
   id: string;
   name: string;
   path: string;
+  kind: ProjectKind;
   created_at: string;
 };
 
 type SessionRow = {
   id: string;
   project_id: string;
+  purpose: SessionPurpose;
   thread_id: string | null;
   active_turn_id: string | null;
   status: SessionStatus;
@@ -43,6 +47,7 @@ function projectFromRow(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     path: row.path,
+    kind: row.kind,
     createdAt: row.created_at,
   };
 }
@@ -51,6 +56,7 @@ function sessionFromRow(row: SessionRow): Session {
   return {
     id: row.id,
     projectId: row.project_id,
+    purpose: row.purpose,
     threadId: row.thread_id,
     activeTurnId: row.active_turn_id,
     status: row.status,
@@ -86,12 +92,14 @@ export class Store {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL DEFAULT 'dev',
         created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL DEFAULT 'general',
         thread_id TEXT,
         active_turn_id TEXT,
         status TEXT NOT NULL,
@@ -118,22 +126,36 @@ export class Store {
   }
 
   private migrate(): void {
-    const columns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
-    const names = new Set(columns.map((column) => column.name));
-    if (!names.has("active_turn_id")) {
+    const projectColumns = this.db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+    const projectNames = new Set(projectColumns.map((column) => column.name));
+    if (!projectNames.has("kind")) {
+      this.db.exec("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'dev'");
+    }
+
+    const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    const sessionNames = new Set(sessionColumns.map((column) => column.name));
+    if (!sessionNames.has("purpose")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN purpose TEXT NOT NULL DEFAULT 'general'");
+    }
+    if (!sessionNames.has("active_turn_id")) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN active_turn_id TEXT");
     }
-    if (!names.has("sandbox_mode")) {
+    if (!sessionNames.has("sandbox_mode")) {
       this.db.exec(
         "ALTER TABLE sessions ADD COLUMN sandbox_mode TEXT NOT NULL DEFAULT 'workspace-write'",
       );
     }
-    if (!names.has("model")) {
+    if (!sessionNames.has("model")) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
     }
-    if (!names.has("reasoning_effort")) {
+    if (!sessionNames.has("reasoning_effort")) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
     }
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS sessions_project_learning_purpose
+      ON sessions(project_id, purpose)
+      WHERE purpose IN ('course', 'practice')
+    `);
   }
 
   close(): void {
@@ -142,37 +164,45 @@ export class Store {
 
   createProject(project: Project): Project {
     this.db
-      .prepare("INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)")
-      .run(project.id, project.name, project.path, project.createdAt);
+      .prepare("INSERT INTO projects (id, name, path, kind, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(project.id, project.name, project.path, project.kind, project.createdAt);
     return project;
   }
 
   listProjects(): Project[] {
     return (
       this.db
-        .prepare("SELECT id, name, path, created_at FROM projects ORDER BY created_at DESC")
+        .prepare("SELECT id, name, path, kind, created_at FROM projects ORDER BY created_at DESC")
         .all() as ProjectRow[]
     ).map(projectFromRow);
   }
 
   getProject(id: string): Project | null {
     const row = this.db
-      .prepare("SELECT id, name, path, created_at FROM projects WHERE id = ?")
+      .prepare("SELECT id, name, path, kind, created_at FROM projects WHERE id = ?")
       .get(id) as ProjectRow | undefined;
     return row ? projectFromRow(row) : null;
+  }
+
+  updateProjectKind(id: string, kind: ProjectKind): Project {
+    const current = this.getProject(id);
+    if (!current) throw new Error(`Project not found: ${id}`);
+    this.db.prepare("UPDATE projects SET kind = ? WHERE id = ?").run(kind, id);
+    return { ...current, kind };
   }
 
   createSession(session: Session): Session {
     this.db
       .prepare(`
         INSERT INTO sessions (
-          id, project_id, thread_id, active_turn_id, status, sandbox_mode, model,
+          id, project_id, purpose, thread_id, active_turn_id, status, sandbox_mode, model,
           reasoning_effort, last_error, created_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         session.id,
         session.projectId,
+        session.purpose,
         session.threadId,
         session.activeTurnId,
         session.status,
@@ -191,14 +221,14 @@ export class Store {
       ? (this.db
           .prepare(`
             SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-                   model, reasoning_effort, last_error, created_at, last_activity_at
+                   purpose, model, reasoning_effort, last_error, created_at, last_activity_at
             FROM sessions WHERE project_id = ? ORDER BY created_at DESC
           `)
           .all(projectId) as SessionRow[])
       : (this.db
           .prepare(`
             SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-                   model, reasoning_effort, last_error, created_at, last_activity_at
+                   purpose, model, reasoning_effort, last_error, created_at, last_activity_at
             FROM sessions ORDER BY created_at DESC
           `)
           .all() as SessionRow[]);
@@ -209,10 +239,21 @@ export class Store {
     const row = this.db
       .prepare(`
         SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-               model, reasoning_effort, last_error, created_at, last_activity_at
+               purpose, model, reasoning_effort, last_error, created_at, last_activity_at
         FROM sessions WHERE id = ?
       `)
       .get(id) as SessionRow | undefined;
+    return row ? sessionFromRow(row) : null;
+  }
+
+  getSessionByPurpose(projectId: string, purpose: SessionPurpose): Session | null {
+    const row = this.db
+      .prepare(`
+        SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
+               purpose, model, reasoning_effort, last_error, created_at, last_activity_at
+        FROM sessions WHERE project_id = ? AND purpose = ?
+      `)
+      .get(projectId, purpose) as SessionRow | undefined;
     return row ? sessionFromRow(row) : null;
   }
 
@@ -220,7 +261,7 @@ export class Store {
     const row = this.db
       .prepare(`
         SELECT id, project_id, thread_id, active_turn_id, status, sandbox_mode,
-               model, reasoning_effort, last_error, created_at, last_activity_at
+               purpose, model, reasoning_effort, last_error, created_at, last_activity_at
         FROM sessions WHERE thread_id = ?
       `)
       .get(threadId) as SessionRow | undefined;

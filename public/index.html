@@ -53,10 +53,18 @@
                 </div>
 
                 <div class="sessions-head">
-                    <span>Сессии</span>
+                    <span id="sessions-label">Сессии</span>
                     <span id="session-count" class="count">0</span>
                 </div>
                 <div id="sessions" class="session-list"></div>
+                <button
+                    id="enable-learning"
+                    class="learning-enable-button"
+                    type="button"
+                    hidden
+                >
+                    Сделать учебным
+                </button>
 
                 <details class="add-project">
                     <summary>Добавить проект</summary>
@@ -74,6 +82,10 @@
                             autocomplete="off"
                             required
                         />
+                        <label class="project-kind-option">
+                            <input id="project-kind-learning" type="checkbox" />
+                            <span>Учебный проект</span>
+                        </label>
                         <button type="submit">Добавить</button>
                     </form>
                 </details>

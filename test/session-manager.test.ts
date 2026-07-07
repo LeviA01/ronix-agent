@@ -13,7 +13,7 @@ function fixture() {
   const codex = new FakeAppServer();
   const manager = new SessionManager(store, codex, 100);
   const now = new Date().toISOString();
-  store.createProject({ id: "p1", name: "Test", path: directory, createdAt: now });
+  store.createProject({ id: "p1", name: "Test", path: directory, kind: "dev", createdAt: now });
   return {
     directory,
     store,
@@ -167,6 +167,25 @@ test("persists access mode and interrupts active work during shutdown", async ()
     const stopped = testFixture.store.getSession(session.id);
     assert.equal(stopped?.status, "error");
     assert.equal(stopped?.activeTurnId, null);
+  } finally {
+    testFixture.close();
+  }
+});
+
+test("creates or reuses fixed learning-purpose sessions", () => {
+  const testFixture = fixture();
+  try {
+    const course = testFixture.manager.ensurePurposeSession("p1", "course");
+    const sameCourse = testFixture.manager.ensurePurposeSession("p1", "course");
+    const practice = testFixture.manager.ensurePurposeSession("p1", "practice");
+
+    assert.equal(sameCourse.id, course.id);
+    assert.equal(course.purpose, "course");
+    assert.equal(practice.purpose, "practice");
+    assert.equal(
+      testFixture.store.listSessions("p1").filter((session) => session.purpose !== "general").length,
+      2,
+    );
   } finally {
     testFixture.close();
   }
