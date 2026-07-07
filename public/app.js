@@ -7,6 +7,13 @@ function loadStoredJson(key, fallback) {
   }
 }
 
+const THEMES = new Set(["terminal", "neon", "moon"]);
+
+function storedTheme() {
+  const theme = localStorage.getItem("ronix-agent-theme") || "terminal";
+  return THEMES.has(theme) ? theme : "terminal";
+}
+
 const state = {
   projects: [],
   projectRoots: [],
@@ -27,10 +34,15 @@ const state = {
   liveResponse: null,
   liveRenderFrame: null,
   selectedSession: null,
+  theme: storedTheme(),
   showTechnical: localStorage.getItem("ronix-agent-technical") === "true",
   learningMode: localStorage.getItem("ronix-agent-learning-mode") || "course",
   progressTab: localStorage.getItem("ronix-agent-progress-tab") || "summary",
   learning: null,
+  gitStatus: null,
+  gitProjectId: null,
+  gitLoading: false,
+  gitError: null,
   drafts: loadStoredJson("ronix-agent-drafts", {}),
   navigation: loadStoredJson("ronix-agent-navigation", {
     projectId: null,
@@ -43,6 +55,17 @@ const $ = (selector) => document.querySelector(selector);
 const appShell = $(".app-shell");
 const chat = $(".chat");
 
+function applyTheme(theme) {
+  state.theme = THEMES.has(theme) ? theme : "terminal";
+  document.body.dataset.theme = state.theme;
+  localStorage.setItem("ronix-agent-theme", state.theme);
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.themeOption === state.theme);
+  });
+}
+
+applyTheme(state.theme);
+
 if (
   !state.navigation.sessionsByProject
   || typeof state.navigation.sessionsByProject !== "object"
@@ -53,14 +76,22 @@ if (
 
 function setSidebarOpen(open) {
   if (open) setSettingsOpen(false);
+  if (open) setGitOpen(false);
   appShell.classList.toggle("sidebar-open", open);
   $("#open-sidebar").setAttribute("aria-expanded", String(open));
   if (open) $("#project").focus({ preventScroll: true });
 }
 
 function setSettingsOpen(open) {
+  if (open) setGitOpen(false);
   chat.classList.toggle("settings-open", open);
   $("#toggle-settings").setAttribute("aria-expanded", String(open));
+}
+
+function setGitOpen(open) {
+  if (open) setSettingsOpen(false);
+  chat.classList.toggle("git-open", open);
+  $("#toggle-git").setAttribute("aria-expanded", String(open));
 }
 
 $("#open-sidebar").addEventListener("click", () => setSidebarOpen(true));
@@ -69,10 +100,14 @@ $("#sidebar-backdrop").addEventListener("click", () => setSidebarOpen(false));
 $("#toggle-settings").addEventListener("click", () => {
   setSettingsOpen(!chat.classList.contains("settings-open"));
 });
+$("#toggle-git").addEventListener("click", () => {
+  setGitOpen(!chat.classList.contains("git-open"));
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setSidebarOpen(false);
     setSettingsOpen(false);
+    setGitOpen(false);
     closeLimits();
     closeCreateProject();
   }
@@ -81,7 +116,22 @@ window.matchMedia("(min-width: 761px)").addEventListener("change", (event) => {
   if (event.matches) {
     setSidebarOpen(false);
     setSettingsOpen(false);
+    setGitOpen(false);
   }
+});
+
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (
+    target.closest("#session-settings")
+    || target.closest("#toggle-settings")
+    || target.closest("#git-panel")
+    || target.closest("#toggle-git")
+  ) {
+    return;
+  }
+  setSettingsOpen(false);
+  setGitOpen(false);
 });
 
 const limitsModal = $("#limits-modal");
@@ -189,6 +239,10 @@ document.querySelectorAll("[data-close-limits]").forEach((button) => {
 });
 $("#refresh-limits").addEventListener("click", () => void loadLimits(true));
 
+document.querySelectorAll("[data-theme-option]").forEach((button) => {
+  button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
+});
+
 $("#show-technical").checked = state.showTechnical;
 $("#show-technical").addEventListener("change", (event) => {
   state.showTechnical = event.target.checked;
@@ -271,6 +325,7 @@ async function loadSessions() {
   if (!projectId) {
     state.sessions = [];
     state.learning = null;
+    resetGitStatus();
     renderSessions();
     renderSessionMeta(null);
     renderEvents();
@@ -283,6 +338,7 @@ async function loadSessions() {
       state.learning?.sessions?.practice,
     ].filter(Boolean);
     renderSessions();
+    if (state.gitProjectId !== projectId && !state.gitLoading) void refreshGitStatus(projectId);
     if (!["course", "practice", "progress"].includes(state.learningMode)) {
       state.learningMode = "course";
     }
@@ -309,6 +365,7 @@ async function loadSessions() {
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
   state.sessions = sessions;
   renderSessions();
+  if (state.gitProjectId !== projectId && !state.gitLoading) void refreshGitStatus(projectId);
   if (!sessions.some((session) => session.id === state.sessionId)) {
     state.sessionId = null;
   }
@@ -345,6 +402,228 @@ function selectedProject() {
 
 function isLearningProject() {
   return selectedProject()?.kind === "learning";
+}
+
+async function refreshGitStatus(projectId = $("#project").value) {
+  if (!projectId) return null;
+  state.gitProjectId = projectId;
+  state.gitLoading = true;
+  state.gitError = null;
+  renderGitPanel();
+  try {
+    const status = await api(`/api/projects/${encodeURIComponent(projectId)}/git/status`);
+    if (state.gitProjectId === projectId) {
+      state.gitStatus = status;
+      state.gitError = null;
+    }
+    return status;
+  } catch (error) {
+    if (state.gitProjectId === projectId) {
+      state.gitStatus = null;
+      state.gitError = error.message;
+    }
+    return null;
+  } finally {
+    if (state.gitProjectId === projectId) {
+      state.gitLoading = false;
+      renderGitPanel();
+    }
+  }
+}
+
+function resetGitStatus() {
+  state.gitStatus = null;
+  state.gitProjectId = null;
+  state.gitLoading = false;
+  state.gitError = null;
+  renderGitPanel();
+}
+
+function renderGitPanel() {
+  const panel = $("#git-panel");
+  const project = selectedProject();
+  const session = state.selectedSession;
+  const progressMode = isLearningProject() && state.learningMode === "progress";
+  if (!project || progressMode) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    $("#toggle-git").hidden = true;
+    setGitOpen(false);
+    return;
+  }
+
+  panel.hidden = false;
+  $("#toggle-git").hidden = false;
+  const status = state.gitProjectId === project.id ? state.gitStatus : null;
+  const loading = state.gitProjectId === project.id && state.gitLoading;
+  const practice = isLearningProject() && session?.purpose === "practice";
+  const actionText = practice ? "Сдать изменения" : "Проверить изменения";
+  const disabledReason = gitActionDisabledReason(status, session, loading);
+  const summary = gitSummaryText(status, loading, state.gitError);
+  panel.innerHTML = `
+    <div class="git-panel-head">
+      <div>
+        <h3>Git</h3>
+        <p>${escapeHtml(summary)}</p>
+      </div>
+      <button
+        id="git-action"
+        class="git-action ${practice ? "primary" : ""}"
+        type="button"
+        ${disabledReason ? "disabled" : ""}
+        title="${escapeHtml(disabledReason || actionText)}"
+      >${escapeHtml(actionText)}</button>
+    </div>
+    ${renderGitFileLists(status)}
+  `;
+  panel.querySelector("#git-action")?.addEventListener("click", () => {
+    void prepareGitPrompt();
+  });
+}
+
+function gitActionDisabledReason(status, session, loading) {
+  if (loading) return "Git-статус обновляется";
+  if (!session) return "Выберите сессию";
+  if (session.status === "running") return "Дождитесь завершения текущего ответа";
+  if (session.status === "stopped") return "Возобновите сессию";
+  if (!status) return state.gitError || "Git-статус еще не загружен";
+  if (!status.repoFound) return status.error || "Git-репозиторий не найден";
+  if (status.clean) return "В проекте нет изменённых файлов";
+  return "";
+}
+
+function gitSummaryText(status, loading, error) {
+  if (loading) return "Обновляем список изменённых файлов";
+  if (error) return error;
+  if (!status) return "Статус ещё не загружен";
+  if (!status.repoFound) return status.error || "В папке проекта не найден Git-репозиторий";
+  const branch = status.branch ? `${status.branch} · ` : "";
+  if (status.clean) return `${branch}рабочее дерево чистое`;
+  return `${branch}${status.changedCount} ${pluralRu(status.changedCount, "файл", "файла", "файлов")} изменено`;
+}
+
+function renderGitFileLists(status) {
+  if (!status?.repoFound || status.clean) return "";
+  const groups = [
+    ["conflicted", "Конфликты"],
+    ["staged", "Staged"],
+    ["unstaged", "Changed"],
+    ["untracked", "Untracked"],
+  ];
+  return `
+    <div class="git-file-groups">
+      ${groups.map(([key, title]) => renderGitFileGroup(title, status.files?.[key] ?? [])).join("")}
+    </div>
+  `;
+}
+
+function renderGitFileGroup(title, files) {
+  if (!files.length) return "";
+  const visible = files.slice(0, 8);
+  const remaining = files.length - visible.length;
+  return `
+    <div class="git-file-group">
+      <span>${escapeHtml(title)}</span>
+      <ul>
+        ${visible.map((file) => `
+          <li>
+            <code>${escapeHtml(file.path)}</code>
+            <small>${escapeHtml(gitStateLabel(file))}</small>
+          </li>
+        `).join("")}
+        ${remaining > 0 ? `<li class="git-more">ещё ${remaining}</li>` : ""}
+      </ul>
+    </div>
+  `;
+}
+
+function gitStateLabel(file) {
+  const labels = {
+    added: "added",
+    copied: "copied",
+    deleted: "deleted",
+    modified: "modified",
+    renamed: "renamed",
+    unmerged: "conflict",
+    untracked: "new",
+    unknown: `${file.index}${file.worktree}`.trim() || "changed",
+  };
+  return labels[file.state] ?? file.state ?? "changed";
+}
+
+async function prepareGitPrompt() {
+  const project = selectedProject();
+  if (!project || !state.selectedSession) return;
+  const status = await refreshGitStatus(project.id);
+  if (!status || gitActionDisabledReason(status, state.selectedSession, false)) return;
+  promptInput.value = buildGitPrompt(status, state.selectedSession);
+  resizePrompt();
+  saveCurrentDraft();
+  promptInput.focus();
+}
+
+function buildGitPrompt(status, session) {
+  const untracked = gitFilePaths(status.files?.untracked ?? []);
+  const changed = [
+    ...gitFilePaths(status.files?.staged ?? []),
+    ...gitFilePaths(status.files?.unstaged ?? []),
+    ...gitFilePaths(status.files?.conflicted ?? []),
+  ];
+  const untrackedBlock = untracked.length
+    ? untracked.map((path) => `- ${path}`).join("\n")
+    : "- нет";
+  const changedBlock = uniqueStrings(changed).length
+    ? uniqueStrings(changed).map((path) => `- ${path}`).join("\n")
+    : "- нет tracked-изменений";
+
+  if (isLearningProject() && session.purpose === "practice") {
+    return [
+      "Проверь сдачу практики по текущим Git-изменениям проекта.",
+      "",
+      "Сначала посмотри `git status --short`, `git diff --stat` и `git diff`.",
+      "Отдельно прочитай untracked-файлы из списка ниже, потому что они не попадают в `git diff`.",
+      "",
+      "Tracked-изменения:",
+      changedBlock,
+      "",
+      "Untracked-файлы:",
+      untrackedBlock,
+      "",
+      "Проведи ревью как наставник: проверь корректность, выполнение задания, ошибки, читаемость и понимание решения. Если неясно, задай вопросы. Обновляй `learning/LEARNING_DIARY.md` и `learning/ROADMAP.md` только если практика действительно завершена.",
+    ].join("\n");
+  }
+
+  return [
+    "Проведи ревью текущих Git-изменений проекта. Ничего не меняй в файлах без отдельной просьбы.",
+    "",
+    "Сначала посмотри `git status --short`, `git diff --stat` и `git diff`.",
+    "Отдельно прочитай untracked-файлы из списка ниже, потому что они не попадают в `git diff`.",
+    "",
+    "Tracked-изменения:",
+    changedBlock,
+    "",
+    "Untracked-файлы:",
+    untrackedBlock,
+    "",
+    "Дай ревью по рискам, багам, недостающим тестам и следующим проверкам.",
+  ].join("\n");
+}
+
+function gitFilePaths(files) {
+  return uniqueStrings(files.flatMap((file) => file.oldPath ? [file.oldPath, file.path] : [file.path]));
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function pluralRu(value, one, few, many) {
+  const abs = Math.abs(value);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function renderLearningDashboard() {
@@ -679,6 +958,7 @@ document.addEventListener("click", closeSessionMenus);
 async function selectSession(id) {
   setSidebarOpen(false);
   setSettingsOpen(false);
+  setGitOpen(false);
   closeSessionMenus();
   saveCurrentDraft();
   state.source?.close();
@@ -774,11 +1054,13 @@ function renderSessionMeta(session) {
     `;
     $("#session-settings").hidden = true;
     $("#toggle-settings").hidden = true;
+    $("#toggle-git").hidden = true;
     $("#interrupt").hidden = true;
     $("#prompt-form").hidden = true;
     $("#send").disabled = true;
     $("#sandbox-mode").disabled = true;
     renderModelControls(null);
+    renderGitPanel();
     return;
   }
   $("#session-title").textContent = sessionTitle(session);
@@ -807,6 +1089,7 @@ function renderSessionMeta(session) {
   $("#session-settings").hidden = false;
   $("#toggle-settings").hidden = false;
   renderModelControls(session);
+  renderGitPanel();
 }
 
 function currentModel(session = state.selectedSession) {
@@ -1775,6 +2058,10 @@ function resetProjectSessionView() {
   state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
+  state.gitStatus = null;
+  state.gitProjectId = null;
+  state.gitLoading = false;
+  state.gitError = null;
   promptInput.value = "";
   resizePrompt();
   renderSessions();
@@ -1802,6 +2089,7 @@ function clearSelectedSessionForProgress() {
   state.selectedSession = null;
   promptInput.value = "";
   resizePrompt();
+  renderGitPanel();
 }
 
 function renderLearningProgressMode() {
@@ -1821,6 +2109,7 @@ function renderLearningProgressMode() {
   $("#prompt-form").hidden = true;
   $("#send").disabled = true;
   $("#sandbox-mode").disabled = true;
+  renderGitPanel();
   renderEvents();
 }
 

@@ -19,6 +19,7 @@ import { AppServerClient } from "./app-server-client.js";
 import { AuthManager } from "./auth.js";
 import { config as defaultConfig } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
+import { readGitStatus } from "./git-status.js";
 import { moduleStatuses } from "./modules.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
@@ -251,6 +252,20 @@ export function createApplication(options: ApplicationOptions = {}): Application
         project: updated,
         learning: readLearningWorkspace(updated, ensureLearningSessions(updated.id)),
       });
+      return true;
+    }
+
+    if (
+      request.method === "GET"
+      && parts.length === 5
+      && parts[1] === "projects"
+      && parts[2]
+      && parts[3] === "git"
+      && parts[4] === "status"
+    ) {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      json(response, 200, await readGitStatus(project.path));
       return true;
     }
 

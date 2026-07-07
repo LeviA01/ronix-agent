@@ -94,6 +94,32 @@
                     <span>Лимиты Codex</span>
                     <span id="limits-summary">Проверить</span>
                 </button>
+                <details class="theme-picker">
+                    <summary>Тема</summary>
+                    <div class="theme-options" id="theme-options">
+                        <button
+                            type="button"
+                            data-theme-option="terminal"
+                        >
+                            <span>Terminal</span>
+                            <small>#22c55e / #f97316</small>
+                        </button>
+                        <button
+                            type="button"
+                            data-theme-option="neon"
+                        >
+                            <span>Неон</span>
+                            <small>#22d3ee / #a855f7</small>
+                        </button>
+                        <button
+                            type="button"
+                            data-theme-option="moon"
+                        >
+                            <span>Moon</span>
+                            <small>#f3f4f6 / #374151</small>
+                        </button>
+                    </div>
+                </details>
                 <button id="logout" class="logout-button" type="button" hidden>
                     Выйти
                 </button>
@@ -120,7 +146,7 @@
                     </div>
                     <button
                         id="toggle-settings"
-                        class="mobile-settings-button"
+                        class="header-tool-button"
                         type="button"
                         aria-label="Настройки сессии"
                         aria-controls="session-settings"
@@ -131,6 +157,22 @@
                             <path d="M4 7h10M18 7h2M4 17h2M10 17h10"></path>
                             <circle cx="16" cy="7" r="2"></circle>
                             <circle cx="8" cy="17" r="2"></circle>
+                        </svg>
+                    </button>
+                    <button
+                        id="toggle-git"
+                        class="header-tool-button"
+                        type="button"
+                        aria-label="Git-изменения"
+                        aria-controls="git-panel"
+                        aria-expanded="false"
+                        hidden
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <circle cx="6" cy="6" r="2"></circle>
+                            <circle cx="18" cy="18" r="2"></circle>
+                            <circle cx="6" cy="18" r="2"></circle>
+                            <path d="M8 6h4a4 4 0 0 1 4 4v6M6 8v8"></path>
                         </svg>
                     </button>
                     <button
@@ -184,6 +226,7 @@
                         <span>Технические события</span>
                     </label>
                 </div>
+                <section id="git-panel" class="git-panel" hidden></section>
 
                 <div
                     id="events"
@@ -221,14 +264,14 @@
                         >
                             <path
                                 d="M18.8951 3.61502C19.7248 3.37794 20.492 4.1451 20.2549 4.97489L16.2553 18.9736C15.8267 20.4736 13.823 20.7554 12.9973 19.4317L10.1999 14.947C9.87715 14.4296 9.44039 13.9928 8.92298 13.6701L4.43823 10.8726C3.11455 10.047 3.39632 8.04323 4.89636 7.61465L18.8951 3.61502Z"
-                                stroke="#000000"
+                                stroke="currentColor"
                                 stroke-width="2"
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
                             />
                             <path
                                 d="M10.1924 13.6777L13.7279 10.1422"
-                                stroke="#000000"
+                                stroke="currentColor"
                                 stroke-width="2"
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
