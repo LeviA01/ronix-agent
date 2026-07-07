@@ -140,6 +140,74 @@ test("routes approval requests and sends the selected decision", async () => {
   }
 });
 
+test("routes permission approval requests and grants requested permissions", async () => {
+  const testFixture = fixture();
+  try {
+    const session = testFixture.manager.createSession("p1");
+    await testFixture.manager.startTurn(session.id, "Need network");
+    testFixture.codex.serverRequest(43, "item/permissions/requestApproval", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      environmentId: null,
+      startedAtMs: Date.now(),
+      cwd: testFixture.directory,
+      reason: "Download dependencies",
+      permissions: {
+        network: { enabled: true },
+        fileSystem: null,
+      },
+    });
+    assert.equal(testFixture.manager.listApprovals(session.id).length, 1);
+    testFixture.manager.respondToApproval(session.id, "43", "acceptForSession");
+    assert.deepEqual(testFixture.codex.responses, [{
+      id: 43,
+      result: {
+        permissions: { network: { enabled: true } },
+        scope: "session",
+      },
+    }]);
+  } finally {
+    testFixture.close();
+  }
+});
+
+test("routes user input requests and returns answers", async () => {
+  const testFixture = fixture();
+  try {
+    const session = testFixture.manager.createSession("p1");
+    await testFixture.manager.startTurn(session.id, "Ask me something");
+    testFixture.codex.serverRequest(44, "item/tool/requestUserInput", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      autoResolutionMs: null,
+      questions: [{
+        id: "goal",
+        header: "Цель",
+        question: "Что учим?",
+        isOther: false,
+        isSecret: false,
+        options: null,
+      }],
+    });
+    assert.equal(testFixture.manager.listApprovals(session.id).length, 1);
+    testFixture.manager.respondToApproval(session.id, "44", "answer", {
+      goal: { answers: ["Python"] },
+    });
+    assert.deepEqual(testFixture.codex.responses, [{
+      id: 44,
+      result: {
+        answers: {
+          goal: { answers: ["Python"] },
+        },
+      },
+    }]);
+  } finally {
+    testFixture.close();
+  }
+});
+
 test("marks an active session failed if app-server exits", async () => {
   const testFixture = fixture();
   try {

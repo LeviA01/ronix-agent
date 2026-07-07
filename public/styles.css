@@ -963,6 +963,80 @@ textarea:focus {
   cursor: pointer;
 }
 
+.user-input-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.user-input-question {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.user-input-question legend {
+  display: grid;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.user-input-question legend span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.user-input-question legend strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.user-input-options {
+  display: grid;
+  gap: 8px;
+}
+
+.user-input-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.user-input-options input[type="radio"] {
+  margin-top: 3px;
+  accent-color: #6ee7a8;
+}
+
+.user-input-options label span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.user-input-options small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.user-input-text,
+.user-input-other {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--text);
+  background: #111419;
+}
+
 .debug-toggle {
   display: flex;
   align-items: center;

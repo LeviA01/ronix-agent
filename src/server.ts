@@ -454,10 +454,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
         && parts[3] === "approvals"
         && parts[4]
       ) {
-        const body = await readJson<{ decision?: unknown }>(request);
+        const body = await readJson<{ decision?: unknown; answers?: unknown }>(request);
         const decision = requireString(body.decision, "decision");
         try {
-          sessions.respondToApproval(sessionId, parts[4], decision);
+          sessions.respondToApproval(sessionId, parts[4], decision, body.answers);
         } catch (error) {
           throw sessionHttpError(error);
         }

@@ -1345,6 +1345,25 @@ function appendEvent(event, container) {
     return;
   }
 
+  if (view.kind === "userInput") {
+    const element = document.createElement("article");
+    element.className = "approval-card user-input-card";
+    element.dataset.approvalId = view.approvalId;
+    element.innerHTML = `
+      <strong>${escapeHtml(view.label)}</strong>
+      ${view.body ? `<pre>${escapeHtml(view.body)}</pre>` : ""}
+      <form class="user-input-form">
+        ${view.questions.map(renderUserInputQuestion).join("")}
+        <div class="approval-actions">
+          <button type="button" data-approval-decision="cancel">Отмена</button>
+          <button type="submit" data-user-input-submit>Отправить</button>
+        </div>
+      </form>
+    `;
+    container.append(element);
+    return;
+  }
+
   const element = document.createElement(view.collapsible ? "details" : "div");
   element.className = `activity ${view.className}`;
   element.innerHTML = view.collapsible
@@ -1357,6 +1376,49 @@ function appendEvent(event, container) {
         ${view.body ? `<pre class="activity-body">${escapeHtml(view.body)}</pre>` : ""}
       `;
   container.append(element);
+}
+
+function renderUserInputQuestion(question) {
+  const options = Array.isArray(question.options) ? question.options : [];
+  const name = `question-${question.id}`;
+  const inputType = question.isSecret ? "password" : "text";
+  return `
+    <fieldset class="user-input-question" data-question-id="${escapeHtml(question.id)}">
+      <legend>
+        <span>${escapeHtml(question.header || "Вопрос")}</span>
+        <strong>${escapeHtml(question.question || "")}</strong>
+      </legend>
+      ${options.length
+        ? `
+          <div class="user-input-options">
+            ${options.map((option, index) => `
+              <label>
+                <input
+                  type="radio"
+                  name="${escapeHtml(name)}"
+                  value="${escapeHtml(option.label)}"
+                  ${index === 0 ? "checked" : ""}
+                />
+                <span>
+                  <strong>${escapeHtml(option.label)}</strong>
+                  ${option.description ? `<small>${escapeHtml(option.description)}</small>` : ""}
+                </span>
+              </label>
+            `).join("")}
+            ${question.isOther ? `
+              <label>
+                <input type="radio" name="${escapeHtml(name)}" value="__other__" />
+                <span>
+                  <strong>Другой ответ</strong>
+                  <input class="user-input-other" type="${inputType}" autocomplete="off" />
+                </span>
+              </label>
+            ` : ""}
+          </div>
+        `
+        : `<input class="user-input-text" type="${inputType}" autocomplete="off" />`}
+    </fieldset>
+  `;
 }
 
 function formatTechnicalEvent(event) {
@@ -1390,15 +1452,34 @@ function formatVisibleEvent(event) {
   }
   if (type === "approval.requested") {
     const approvalId = payload.approvalId;
+    if (payload.method === "item/tool/requestUserInput") {
+      return {
+        kind: "userInput",
+        approvalId,
+        label: "Codex просит уточнение",
+        body: payload.autoResolutionMs
+          ? `Если не ответить, Codex продолжит примерно через ${Math.round(payload.autoResolutionMs / 1000)} сек.`
+          : "",
+        questions: Array.isArray(payload.questions) ? payload.questions : [],
+        className: "approval",
+      };
+    }
     const command = payload.command;
     const reason = payload.reason;
+    const permissions = payload.permissions
+      ? JSON.stringify(payload.permissions, null, 2)
+      : "";
+    const cwd = payload.cwd ? `cwd: ${payload.cwd}` : "";
+    const grantRoot = payload.grantRoot ? `root: ${payload.grantRoot}` : "";
     return {
       kind: "approval",
       approvalId,
-      label: payload.method?.includes("fileChange")
+      label: payload.method?.includes("permissions")
+        ? "Codex запрашивает расширенные права"
+        : payload.method?.includes("fileChange") || payload.method === "applyPatchApproval"
         ? "Codex запрашивает изменение файлов"
         : "Codex запрашивает выполнение команды",
-      body: [command, reason].filter(Boolean).join("\n"),
+      body: [command, cwd, grantRoot, reason, permissions].filter(Boolean).join("\n"),
       className: "approval",
     };
   }
@@ -1553,6 +1634,49 @@ $("#events").addEventListener("click", async (event) => {
     button.textContent = "Копировать";
   }, 1200);
 });
+
+$("#events").addEventListener("submit", async (event) => {
+  const form = event.target.closest(".user-input-form");
+  if (!form) return;
+  event.preventDefault();
+  const card = form.closest("[data-approval-id]");
+  if (!card || !state.sessionId) return;
+  const button = form.querySelector("[data-user-input-submit]");
+  if (button) button.disabled = true;
+  try {
+    await api(`/api/sessions/${state.sessionId}/approvals/${card.dataset.approvalId}`, {
+      method: "POST",
+      body: JSON.stringify({
+        decision: "answer",
+        answers: collectUserInputAnswers(form),
+      }),
+    });
+  } catch (error) {
+    if (button) button.disabled = false;
+    alert(error.message);
+  }
+});
+
+function collectUserInputAnswers(form) {
+  const answers = {};
+  form.querySelectorAll("[data-question-id]").forEach((fieldset) => {
+    const id = fieldset.dataset.questionId;
+    if (!id) return;
+    const checked = fieldset.querySelector("input[type='radio']:checked");
+    const text = fieldset.querySelector(".user-input-text");
+    const other = fieldset.querySelector(".user-input-other");
+    let values = [];
+    if (checked) {
+      values = checked.value === "__other__"
+        ? [other?.value?.trim() ?? ""]
+        : [checked.value];
+    } else if (text) {
+      values = [text.value.trim()];
+    }
+    answers[id] = { answers: values.filter(Boolean) };
+  });
+  return answers;
+}
 
 async function loadOlderEvents(button) {
   if (!state.sessionId || !state.firstSequence) return;

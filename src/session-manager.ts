@@ -24,6 +24,10 @@ type ModelListResponse = { data: CodexModel[]; nextCursor: string | null };
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+  "item/tool/requestUserInput",
+  "execCommandApproval",
+  "applyPatchApproval",
 ]);
 
 const TRANSIENT_EVENT_TYPES = [
@@ -227,12 +231,34 @@ export class SessionManager {
       .map(({ rpcId: _rpcId, ...approval }) => approval);
   }
 
-  respondToApproval(sessionId: string, approvalId: string, decision: string): void {
+  respondToApproval(
+    sessionId: string,
+    approvalId: string,
+    decision: string,
+    answers?: unknown,
+  ): void {
     const approval = this.pendingApprovals.get(approvalId);
     if (!approval || approval.sessionId !== sessionId) throw new Error("Approval not found");
-    const allowed = ["accept", "acceptForSession", "decline", "cancel"];
+    const allowed = ["accept", "acceptForSession", "decline", "cancel", "answer"];
     if (!allowed.includes(decision)) throw new Error("Invalid approval decision");
-    this.codex.respond(approval.rpcId, { decision });
+    if (approval.method === "item/tool/requestUserInput") {
+      if (decision === "answer") {
+        this.codex.respond(approval.rpcId, { answers: normalizeUserInputAnswers(answers) });
+      } else {
+        this.codex.respondError(approval.rpcId, -32000, "User input request was cancelled");
+      }
+    } else if (approval.method === "item/permissions/requestApproval") {
+      if (decision === "accept" || decision === "acceptForSession") {
+        this.codex.respond(approval.rpcId, {
+          permissions: grantedPermissions(approval.payload.permissions),
+          scope: decision === "acceptForSession" ? "session" : "turn",
+        });
+      } else {
+        this.codex.respondError(approval.rpcId, -32000, "Permission request was declined");
+      }
+    } else {
+      this.codex.respond(approval.rpcId, { decision });
+    }
     this.pendingApprovals.delete(approvalId);
     this.publish(sessionId, "approval.resolved", { approvalId, decision });
   }
@@ -330,7 +356,9 @@ export class SessionManager {
 
   private handleServerRequest(request: AppServerRequest): void {
     const threadId = stringField(request.params, "threadId");
-    const session = threadId ? this.store.getSessionByThreadId(threadId) : null;
+    const session = threadId
+      ? this.store.getSessionByThreadId(threadId)
+      : this.onlyRunningSession();
     if (!session || !APPROVAL_METHODS.has(request.method)) {
       this.codex.respondError(request.id, -32601, "Unsupported Ronix server request");
       return;
@@ -350,6 +378,13 @@ export class SessionManager {
       method: request.method,
       ...request.params,
     });
+  }
+
+  private onlyRunningSession(): Session | null {
+    const running = this.store.listSessions().filter((session) =>
+      session.status === "running" && session.activeTurnId
+    );
+    return running.length === 1 ? running[0] ?? null : null;
   }
 
   private handleAppServerExit(error: Error): void {
@@ -400,4 +435,35 @@ function nestedStringField(
     value = (value as Record<string, unknown>)[key];
   }
   return typeof value === "string" ? value : null;
+}
+
+function grantedPermissions(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const request = value as Record<string, unknown>;
+  const granted: Record<string, unknown> = {};
+  if (request.network && typeof request.network === "object") {
+    granted.network = request.network;
+  }
+  if (request.fileSystem && typeof request.fileSystem === "object") {
+    granted.fileSystem = request.fileSystem;
+  }
+  return granted;
+}
+
+function normalizeUserInputAnswers(value: unknown): Record<string, { answers: string[] }> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const result: Record<string, { answers: string[] }> = {};
+  for (const [key, answer] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof answer === "object" && answer !== null && !Array.isArray(answer)) {
+      const answers = (answer as Record<string, unknown>).answers;
+      result[key] = {
+        answers: Array.isArray(answers)
+          ? answers.filter((item): item is string => typeof item === "string")
+          : [],
+      };
+    } else if (typeof answer === "string") {
+      result[key] = { answers: [answer] };
+    }
+  }
+  return result;
 }
