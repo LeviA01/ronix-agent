@@ -687,6 +687,27 @@ type LearningSessions = {
   practice: Session;
 };
 
+const ROOT_LEARNING_AGENTS_TEMPLATE = `# Учебный проект Ronix
+
+Этот проект работает в учебном режиме Ronix. Codex должен вести себя как
+AI-наставник, а не как обычный исполнитель задач разработки.
+
+## Обязательные правила
+
+1. Перед учебной работой прочитай \`learning/AGENTS.md\`,
+   \`learning/LEARNING_DIARY.md\` и \`learning/ROADMAP.md\`.
+2. Ученик не редактирует оценки, дневник и маршрут вручную.
+3. Codex ведет \`learning/LEARNING_DIARY.md\` и \`learning/ROADMAP.md\`.
+4. В режиме курса объясняй темы и двигайся по \`learning/ROADMAP.md\`.
+5. В режиме практики проверяй код, задавай уточняющие вопросы и после
+   завершенной практики обновляй дневник.
+6. Если маршрут устарел, скорректируй \`learning/ROADMAP.md\` с кратким
+   основанием.
+7. Общение и учебные записи ведутся на русском языке.
+
+Полные правила наставника находятся в \`learning/AGENTS.md\`.
+`;
+
 const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-наставника
 
 ## Роль
@@ -809,6 +830,7 @@ const LEARNING_ROADMAP_TEMPLATE = `# Дорожная карта
 function ensureLearningWorkspace(projectPath: string): void {
   const learningRoot = join(projectPath, "learning");
   mkdirSync(learningRoot, { recursive: true });
+  writeTemplateIfMissing(join(projectPath, "AGENTS.md"), ROOT_LEARNING_AGENTS_TEMPLATE);
   writeTemplateIfMissing(join(learningRoot, "AGENTS.md"), LEARNING_AGENTS_TEMPLATE);
   writeTemplateIfMissing(join(learningRoot, "LEARNING_DIARY.md"), LEARNING_DIARY_TEMPLATE);
   writeTemplateIfMissing(join(learningRoot, "ROADMAP.md"), LEARNING_ROADMAP_TEMPLATE);
@@ -824,6 +846,8 @@ function readLearningWorkspace(project: Project, purposeSessions?: LearningSessi
   available: boolean;
   source: "learning" | "examples" | null;
   root: string | null;
+  rootAgentsPath: string | null;
+  rootAgentsPresent: boolean;
   agentsPath: string | null;
   diaryPath: string | null;
   roadmapPath: string | null;
@@ -838,6 +862,7 @@ function readLearningWorkspace(project: Project, purposeSessions?: LearningSessi
 } {
   const learningRoot = join(project.path, "learning");
   const examplesRoot = join(project.path, "examples");
+  const rootAgentsPresent = existsSync(join(project.path, "AGENTS.md"));
   const candidates = [
     { source: "learning" as const, root: learningRoot, prefix: "learning/", files: ["AGENTS.md", "LEARNING_DIARY.md", "ROADMAP.md"] },
     { source: "examples" as const, root: examplesRoot, prefix: "examples/", files: ["AGENTS.md", "LEARNING_DIARY.md"] },
@@ -857,15 +882,20 @@ function readLearningWorkspace(project: Project, purposeSessions?: LearningSessi
   const expectedRoot = existsSync(learningRoot) || project.kind === "learning"
     ? { root: learningRoot, prefix: "learning/" }
     : { root: examplesRoot, prefix: "examples/" };
-  const missing = ["AGENTS.md", "LEARNING_DIARY.md", "ROADMAP.md"]
+  const missing = [
+    ...(project.kind === "learning" && !rootAgentsPresent ? ["AGENTS.md"] : []),
+    ...["AGENTS.md", "LEARNING_DIARY.md", "ROADMAP.md"]
     .filter((file) => !existsSync(join(expectedRoot.root, file)))
-    .map((file) => `${expectedRoot.prefix}${file}`);
+    .map((file) => `${expectedRoot.prefix}${file}`),
+  ];
   const diarySummary = summarizeDiary(diary);
   return {
     kind: project.kind,
     available: Boolean(root),
     source: found?.source ?? null,
     root,
+    rootAgentsPath: rootAgentsPresent ? "AGENTS.md" : null,
+    rootAgentsPresent,
     agentsPath: found ? `${found.prefix}AGENTS.md` : null,
     diaryPath: found ? `${found.prefix}LEARNING_DIARY.md` : null,
     roadmapPath: found && roadmapPath ? `${found.prefix}ROADMAP.md` : null,

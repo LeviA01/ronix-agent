@@ -94,16 +94,23 @@ test("serves security headers, rejects foreign origins, and pages event history"
     );
     assert.equal(enableLearning.status, 200);
     assert.equal(store.getProject(createdDevBody.project.id)?.kind, "learning");
+    assert.equal(existsSync(join(createdDevBody.project.path, "AGENTS.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "AGENTS.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "LEARNING_DIARY.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "ROADMAP.md")), true);
     const customRoadmap = "# Custom roadmap\n";
+    const customRootAgents = "# Custom root agents\n";
+    writeFileSync(join(createdDevBody.project.path, "AGENTS.md"), customRootAgents);
     writeFileSync(join(createdDevBody.project.path, "learning", "ROADMAP.md"), customRoadmap);
     const enableAgain = await fetch(
       `${base}/api/projects/${createdDevBody.project.id}/learning/enable`,
       { method: "POST", headers: { origin: base } },
     );
     assert.equal(enableAgain.status, 200);
+    assert.equal(
+      readFileSync(join(createdDevBody.project.path, "AGENTS.md"), "utf8"),
+      customRootAgents,
+    );
     assert.equal(
       readFileSync(join(createdDevBody.project.path, "learning", "ROADMAP.md"), "utf8"),
       customRoadmap,
@@ -121,6 +128,10 @@ test("serves security headers, rejects foreign origins, and pages event history"
       project: { id: string; kind: string; path: string };
     };
     assert.equal(createdLearningBody.project.kind, "learning");
+    assert.match(
+      readFileSync(join(createdLearningBody.project.path, "AGENTS.md"), "utf8"),
+      /learning\/AGENTS\.md/,
+    );
     writeFileSync(join(createdLearningBody.project.path, "learning", "LEARNING_DIARY.md"), [
       "# Учебный дневник",
       "",
@@ -172,6 +183,8 @@ test("serves security headers, rejects foreign origins, and pages event history"
     const learningStateBody = await learningState.json() as {
       available: boolean;
       source: string;
+      rootAgentsPath: string;
+      rootAgentsPresent: boolean;
       diaryPath: string;
       roadmapPath: string;
       diarySummary: {
@@ -192,6 +205,8 @@ test("serves security headers, rejects foreign origins, and pages event history"
     };
     assert.equal(learningStateBody.available, true);
     assert.equal(learningStateBody.source, "learning");
+    assert.equal(learningStateBody.rootAgentsPath, "AGENTS.md");
+    assert.equal(learningStateBody.rootAgentsPresent, true);
     assert.equal(learningStateBody.diaryPath, "learning/LEARNING_DIARY.md");
     assert.equal(learningStateBody.roadmapPath, "learning/ROADMAP.md");
     assert.deepEqual(learningStateBody.diarySummary.focus, ["Исключения"]);
