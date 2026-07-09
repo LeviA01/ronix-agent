@@ -25,6 +25,9 @@ export type GitStatus = {
   repoFound: boolean;
   root: string | null;
   branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
   clean: boolean;
   changedCount: number;
   files: {
@@ -35,6 +38,24 @@ export type GitStatus = {
   };
   error: string | null;
 };
+
+export type GitAction = "fetch" | "pull" | "push";
+
+export type GitActionResult = {
+  action: GitAction;
+  ok: true;
+  output: string;
+  status: GitStatus;
+};
+
+export class GitActionError extends Error {
+  constructor(
+    message: string,
+    readonly output: string,
+  ) {
+    super(message);
+  }
+}
 
 const EMPTY_FILES: GitStatus["files"] = {
   staged: [],
@@ -57,6 +78,9 @@ export async function readGitStatus(cwd: string): Promise<GitStatus> {
       repoFound: false,
       root: null,
       branch: null,
+      upstream: null,
+      ahead: 0,
+      behind: 0,
       clean: true,
       changedCount: 0,
       files: emptyFiles(),
@@ -89,11 +113,18 @@ export function parseGitStatus(output: string): GitStatus {
   const files = emptyFiles();
   const changedPaths = new Set<string>();
   let branch: string | null = null;
+  let upstream: string | null = null;
+  let ahead = 0;
+  let behind = 0;
 
   for (const line of output.split(/\r?\n/)) {
     if (!line) continue;
     if (line.startsWith("## ")) {
-      branch = parseBranch(line.slice(3));
+      const branchInfo = parseBranchInfo(line.slice(3));
+      branch = branchInfo.branch;
+      upstream = branchInfo.upstream;
+      ahead = branchInfo.ahead;
+      behind = branchInfo.behind;
       continue;
     }
     if (line.length < 4) continue;
@@ -122,6 +153,9 @@ export function parseGitStatus(output: string): GitStatus {
     repoFound: true,
     root: null,
     branch,
+    upstream,
+    ahead,
+    behind,
     clean: changedPaths.size === 0,
     changedCount: changedPaths.size,
     files,
@@ -138,10 +172,58 @@ function emptyFiles(): GitStatus["files"] {
   };
 }
 
-function parseBranch(value: string): string | null {
-  if (value.startsWith("No commits yet on ")) return value.slice("No commits yet on ".length).trim();
-  if (value.startsWith("HEAD ")) return "HEAD";
-  return value.split("...", 1)[0]?.trim() || null;
+export function isGitAction(action: string): action is GitAction {
+  return action === "fetch" || action === "pull" || action === "push";
+}
+
+export async function runGitAction(cwd: string, action: GitAction): Promise<GitActionResult> {
+  const args: Record<GitAction, string[]> = {
+    fetch: ["fetch", "--prune"],
+    pull: ["pull", "--ff-only"],
+    push: ["push"],
+  };
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      "git",
+      args[action],
+      { cwd, timeout: 60_000, maxBuffer: 1_000_000 },
+    );
+    return {
+      action,
+      ok: true,
+      output: truncateOutput([stdout, stderr].filter(Boolean).join("\n").trim()),
+      status: await readGitStatus(cwd),
+    };
+  } catch (error) {
+    throw new GitActionError(shortGitError(error), truncateOutput(gitCommandOutput(error)));
+  }
+}
+
+function parseBranchInfo(value: string): Pick<GitStatus, "branch" | "upstream" | "ahead" | "behind"> {
+  const detailMatch = value.match(/\s+\[(.+)\]$/);
+  const detail = detailMatch?.[1] ?? "";
+  const branchPart = detailMatch?.index === undefined
+    ? value.trim()
+    : value.slice(0, detailMatch.index).trim();
+  let branch: string | null;
+  let upstream: string | null = null;
+
+  if (branchPart.startsWith("No commits yet on ")) {
+    branch = branchPart.slice("No commits yet on ".length).trim() || null;
+  } else if (branchPart.startsWith("HEAD ")) {
+    branch = "HEAD";
+  } else {
+    const [branchName, upstreamName] = branchPart.split("...", 2);
+    branch = branchName?.trim() || null;
+    upstream = upstreamName?.trim() || null;
+  }
+
+  return {
+    branch,
+    upstream,
+    ahead: numberFromDetail(detail, "ahead"),
+    behind: numberFromDetail(detail, "behind"),
+  };
 }
 
 function parseChangedFile(index: string, worktree: string, rawPath: string): GitChangedFile | null {
@@ -196,4 +278,23 @@ function shortGitError(error: unknown): string {
   const detail = maybeOutput.stderr || maybeOutput.stdout || error.message;
   const firstLine = detail.split(/\r?\n/).find((line) => line.trim())?.trim();
   return firstLine || `git exited with code ${String(maybeOutput.code ?? "unknown")}`;
+}
+
+function numberFromDetail(detail: string, key: "ahead" | "behind"): number {
+  const match = new RegExp(`${key} (\\d+)`).exec(detail);
+  return match ? Number(match[1]) : 0;
+}
+
+function gitCommandOutput(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const maybeOutput = error as Error & { stderr?: string; stdout?: string };
+  return [maybeOutput.stdout, maybeOutput.stderr, error.message]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function truncateOutput(output: string): string {
+  if (output.length <= 4_000) return output;
+  return `${output.slice(0, 4_000)}\n…`;
 }

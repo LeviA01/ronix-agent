@@ -19,7 +19,7 @@ import { AppServerClient } from "./app-server-client.js";
 import { AuthManager } from "./auth.js";
 import { config as defaultConfig } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
-import { readGitStatus } from "./git-status.js";
+import { GitActionError, isGitAction, readGitStatus, runGitAction } from "./git-status.js";
 import { moduleStatuses } from "./modules.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
@@ -266,6 +266,29 @@ export function createApplication(options: ApplicationOptions = {}): Application
       const project = store.getProject(parts[2]);
       if (!project) throw new HttpError(404, "Project not found");
       json(response, 200, await readGitStatus(project.path));
+      return true;
+    }
+
+    if (
+      request.method === "POST"
+      && parts.length === 5
+      && parts[1] === "projects"
+      && parts[2]
+      && parts[3] === "git"
+    ) {
+      const action = parts[4];
+      if (!action || !isGitAction(action)) throw new HttpError(400, "Unknown Git action");
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      try {
+        json(response, 200, await runGitAction(project.path, action));
+      } catch (error) {
+        if (error instanceof GitActionError) {
+          json(response, 409, { error: error.message, output: error.output });
+          return true;
+        }
+        throw error;
+      }
       return true;
     }
 

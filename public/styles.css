@@ -1321,6 +1321,78 @@ body[data-theme="moon"] .chat::before {
   background: var(--attention-strong);
 }
 
+.git-sync {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.git-remote-state {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.git-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.git-sync-button {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 11px;
+  color: var(--text-soft);
+  background: var(--surface-raised);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.git-sync-button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.git-sync-button.accent:not(:disabled) {
+  border-color: var(--attention);
+  color: var(--attention);
+}
+
+.git-sync-message {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 11px;
+}
+
+.git-sync-message.error {
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.git-sync-message > span {
+  font-weight: 800;
+}
+
+.git-sync-message pre {
+  max-height: 96px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--muted-strong);
+  font: 10px/1.45 var(--font-mono);
+}
+
 .git-file-groups {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

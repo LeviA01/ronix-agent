@@ -43,6 +43,8 @@ const state = {
   gitProjectId: null,
   gitLoading: false,
   gitError: null,
+  gitSyncRunning: null,
+  gitSyncMessage: null,
   drafts: loadStoredJson("ronix-agent-drafts", {}),
   navigation: loadStoredJson("ronix-agent-navigation", {
     projectId: null,
@@ -436,6 +438,8 @@ function resetGitStatus() {
   state.gitProjectId = null;
   state.gitLoading = false;
   state.gitError = null;
+  state.gitSyncRunning = null;
+  state.gitSyncMessage = null;
   renderGitPanel();
 }
 
@@ -474,10 +478,16 @@ function renderGitPanel() {
         title="${escapeHtml(disabledReason || actionText)}"
       >${escapeHtml(actionText)}</button>
     </div>
+    ${renderGitSyncSection(status, loading)}
     ${renderGitFileLists(status)}
   `;
   panel.querySelector("#git-action")?.addEventListener("click", () => {
     void prepareGitPrompt();
+  });
+  panel.querySelectorAll("[data-git-sync]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void runGitSync(button.dataset.gitSync);
+    });
   });
 }
 
@@ -497,9 +507,122 @@ function gitSummaryText(status, loading, error) {
   if (error) return error;
   if (!status) return "Статус ещё не загружен";
   if (!status.repoFound) return status.error || "В папке проекта не найден Git-репозиторий";
-  const branch = status.branch ? `${status.branch} · ` : "";
-  if (status.clean) return `${branch}рабочее дерево чистое`;
-  return `${branch}${status.changedCount} ${pluralRu(status.changedCount, "файл", "файла", "файлов")} изменено`;
+  const branch = gitBranchText(status);
+  if (status.clean) return `${branch} · рабочее дерево чистое`;
+  return `${branch} · ${status.changedCount} ${pluralRu(status.changedCount, "файл", "файла", "файлов")} изменено`;
+}
+
+function gitBranchText(status) {
+  const branch = status.branch || "ветка неизвестна";
+  const upstream = status.upstream ? ` → ${status.upstream}` : "";
+  const divergence = [
+    status.ahead > 0 ? `↑${status.ahead}` : "",
+    status.behind > 0 ? `↓${status.behind}` : "",
+  ].filter(Boolean).join(" ");
+  return `${branch}${upstream}${divergence ? ` · ${divergence}` : ""}`;
+}
+
+function renderGitSyncSection(status, loading) {
+  if (!status?.repoFound) return "";
+  const buttons = ["fetch", "pull", "push"].map((action) => {
+    const disabledReason = gitSyncDisabledReason(action, status, loading);
+    const running = state.gitSyncRunning === action;
+    const label = running ? `${gitSyncLabel(action)}...` : gitSyncLabel(action);
+    return `
+      <button
+        type="button"
+        class="git-sync-button ${action === "push" ? "accent" : ""}"
+        data-git-sync="${escapeHtml(action)}"
+        ${disabledReason || running ? "disabled" : ""}
+        title="${escapeHtml(disabledReason || gitSyncTitle(action))}"
+      >${escapeHtml(label)}</button>
+    `;
+  }).join("");
+  const message = state.gitSyncMessage ? `
+    <div class="git-sync-message ${state.gitSyncMessage.kind}">
+      <span>${escapeHtml(state.gitSyncMessage.text)}</span>
+      ${state.gitSyncMessage.output ? `<pre>${escapeHtml(state.gitSyncMessage.output)}</pre>` : ""}
+    </div>
+  ` : "";
+  return `
+    <div class="git-sync">
+      <div class="git-remote-state">${escapeHtml(gitRemoteStateText(status))}</div>
+      <div class="git-sync-actions">${buttons}</div>
+      ${message}
+    </div>
+  `;
+}
+
+function gitSyncDisabledReason(action, status, loading) {
+  if (loading) return "Git-статус обновляется";
+  if (state.gitSyncRunning) return "Git-команда уже выполняется";
+  if (!status?.repoFound) return status?.error || "Git-репозиторий не найден";
+  if (action === "fetch") return "";
+  if (!status.upstream) return "У ветки не настроен upstream";
+  if (action === "pull") {
+    if (!status.clean) return "Сначала уберите или сдайте локальные изменения";
+    if (status.behind <= 0) return "Нет входящих коммитов";
+  }
+  if (action === "push" && status.ahead <= 0) return "Нет исходящих коммитов";
+  return "";
+}
+
+function gitSyncLabel(action) {
+  return {
+    fetch: "Fetch",
+    pull: "Pull",
+    push: "Push",
+  }[action] ?? action;
+}
+
+function gitSyncTitle(action) {
+  return {
+    fetch: "Обновить состояние remote",
+    pull: "Подтянуть входящие коммиты через fast-forward",
+    push: "Отправить локальные коммиты в upstream",
+  }[action] ?? action;
+}
+
+function gitRemoteStateText(status) {
+  if (!status.upstream) return "Remote не привязан к текущей ветке";
+  const parts = [];
+  if (status.behind > 0) parts.push(`${status.behind} входящих`);
+  if (status.ahead > 0) parts.push(`${status.ahead} исходящих`);
+  return parts.length ? parts.join(" · ") : "Синхронизировано с upstream";
+}
+
+async function runGitSync(action) {
+  if (!["fetch", "pull", "push"].includes(action)) return;
+  const project = selectedProject();
+  if (!project) return;
+  state.gitSyncRunning = action;
+  state.gitSyncMessage = null;
+  renderGitPanel();
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/git/${action}`, {
+      method: "POST",
+    });
+    if (state.gitProjectId === project.id || !state.gitProjectId) {
+      state.gitProjectId = project.id;
+      state.gitStatus = result.status;
+      state.gitError = null;
+    }
+    state.gitSyncMessage = {
+      kind: "success",
+      text: `${gitSyncLabel(action)} выполнен`,
+      output: result.output || "",
+    };
+  } catch (error) {
+    state.gitSyncMessage = {
+      kind: "error",
+      text: error.message || `${gitSyncLabel(action)} завершился с ошибкой`,
+      output: error.output || "",
+    };
+    await refreshGitStatus(project.id);
+  } finally {
+    if (state.gitSyncRunning === action) state.gitSyncRunning = null;
+    renderGitPanel();
+  }
 }
 
 function renderGitFileLists(status) {
