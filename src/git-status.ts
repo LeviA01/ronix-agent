@@ -89,6 +89,7 @@ export async function readGitStatus(cwd: string): Promise<GitStatus> {
   }
 
   const parsed = parseGitStatus(statusOutput);
+  const tracking = await readGitTracking(cwd);
   let root: string | null = null;
   try {
     const { stdout } = await execFileAsync(
@@ -105,6 +106,9 @@ export async function readGitStatus(cwd: string): Promise<GitStatus> {
     ...parsed,
     repoFound: true,
     root,
+    upstream: tracking.upstream ?? parsed.upstream,
+    ahead: tracking.ahead ?? parsed.ahead,
+    behind: tracking.behind ?? parsed.behind,
     error: null,
   };
 }
@@ -196,6 +200,42 @@ export async function runGitAction(cwd: string, action: GitAction): Promise<GitA
     };
   } catch (error) {
     throw new GitActionError(shortGitError(error), truncateOutput(gitCommandOutput(error)));
+  }
+}
+
+async function readGitTracking(cwd: string): Promise<{
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+}> {
+  let upstream: string | null = null;
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+      { cwd, timeout: 5_000, maxBuffer: 64_000 },
+    );
+    upstream = stdout.trim() || null;
+  } catch {
+    return { upstream: null, ahead: null, behind: null };
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+      { cwd, timeout: 5_000, maxBuffer: 64_000 },
+    );
+    const [aheadRaw, behindRaw] = stdout.trim().split(/\s+/);
+    const ahead = Number(aheadRaw);
+    const behind = Number(behindRaw);
+    return {
+      upstream,
+      ahead: Number.isFinite(ahead) ? ahead : null,
+      behind: Number.isFinite(behind) ? behind : null,
+    };
+  } catch {
+    return { upstream, ahead: null, behind: null };
   }
 }
 

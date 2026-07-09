@@ -558,12 +558,15 @@ function gitSyncDisabledReason(action, status, loading) {
   if (state.gitSyncRunning) return "Git-команда уже выполняется";
   if (!status?.repoFound) return status?.error || "Git-репозиторий не найден";
   if (action === "fetch") return "";
-  if (!status.upstream) return "У ветки не настроен upstream";
   if (action === "pull") {
-    if (!status.clean) return "Сначала уберите или сдайте локальные изменения";
+    if (!status.upstream) return "У ветки не настроен upstream";
     if (status.behind <= 0) return "Нет входящих коммитов";
   }
-  if (action === "push" && status.ahead <= 0) return "Нет исходящих коммитов";
+  if (action === "push") {
+    if (status.ahead <= 0 && !status.clean) return "Push отправляет только коммиты: сначала нужен commit";
+    if (!status.upstream) return "У ветки не настроен upstream";
+    if (status.ahead <= 0) return "Нет исходящих коммитов";
+  }
   return "";
 }
 
@@ -588,6 +591,7 @@ function gitRemoteStateText(status) {
   const parts = [];
   if (status.behind > 0) parts.push(`${status.behind} входящих`);
   if (status.ahead > 0) parts.push(`${status.ahead} исходящих`);
+  if (!status.clean && status.ahead <= 0) parts.push("локальные правки ещё не в commit");
   return parts.length ? parts.join(" · ") : "Синхронизировано с upstream";
 }
 

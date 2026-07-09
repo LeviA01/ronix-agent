@@ -67,7 +67,9 @@ test("runs read-only and sync git actions from the supplied cwd", async (t) => {
     writeFileSync(join(repo, "file.txt"), "two\n");
     execFileSync("git", ["add", "file.txt"], { cwd: repo, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "second"], { cwd: repo, stdio: "ignore" });
-    assert.equal((await readGitStatus(repo)).ahead, 1);
+    const aheadStatus = await readGitStatus(repo);
+    assert.match(aheadStatus.upstream ?? "", /^origin\//);
+    assert.equal(aheadStatus.ahead, 1);
 
     const fetch = await runGitAction(repo, "fetch");
     assert.equal(fetch.ok, true);
