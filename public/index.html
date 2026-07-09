@@ -57,14 +57,6 @@
                     <span id="session-count" class="count">0</span>
                 </div>
                 <div id="sessions" class="session-list"></div>
-                <button
-                    id="enable-learning"
-                    class="learning-enable-button"
-                    type="button"
-                    hidden
-                >
-                    Сделать учебным
-                </button>
 
                 <details class="add-project">
                     <summary>Добавить проект</summary>
@@ -90,36 +82,14 @@
                     </form>
                 </details>
 
+                <button id="show-settings" class="settings-button" type="button">
+                    <span>Настройки Ronix</span>
+                    <span id="settings-summary">Проекты и тема</span>
+                </button>
                 <button id="show-limits" class="limits-button" type="button">
                     <span>Лимиты Codex</span>
                     <span id="limits-summary">Проверить</span>
                 </button>
-                <details class="theme-picker">
-                    <summary>Тема</summary>
-                    <div class="theme-options" id="theme-options">
-                        <button
-                            type="button"
-                            data-theme-option="terminal"
-                        >
-                            <span>Terminal</span>
-                            <small>#22c55e / #f97316</small>
-                        </button>
-                        <button
-                            type="button"
-                            data-theme-option="neon"
-                        >
-                            <span>Неон</span>
-                            <small>#22d3ee / #a855f7</small>
-                        </button>
-                        <button
-                            type="button"
-                            data-theme-option="moon"
-                        >
-                            <span>Moon</span>
-                            <small>#f3f4f6 / #374151</small>
-                        </button>
-                    </div>
-                </details>
                 <button id="logout" class="logout-button" type="button" hidden>
                     Выйти
                 </button>
@@ -323,6 +293,99 @@
                         >
                             Создать проект
                         </button>
+                    </div>
+                </section>
+            </div>
+
+            <div
+                id="settings-modal"
+                class="settings-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="settings-title"
+                hidden
+            >
+                <button
+                    class="settings-backdrop"
+                    type="button"
+                    data-close-settings
+                    aria-label="Закрыть настройки"
+                ></button>
+                <section class="settings-panel">
+                    <header class="settings-head">
+                        <div>
+                            <h2 id="settings-title">Настройки Ronix</h2>
+                            <p>Оформление и проекты</p>
+                        </div>
+                        <button
+                            class="settings-close"
+                            type="button"
+                            data-close-settings
+                            aria-label="Закрыть"
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6 6 18"></path>
+                            </svg>
+                        </button>
+                    </header>
+                    <div class="settings-content">
+                        <nav class="settings-tabs" aria-label="Разделы настроек">
+                            <button
+                                type="button"
+                                data-settings-tab="projects"
+                                class="active"
+                            >
+                                Проекты
+                            </button>
+                            <button
+                                type="button"
+                                data-settings-tab="appearance"
+                            >
+                                Оформление
+                            </button>
+                        </nav>
+                        <div class="settings-panels">
+                            <section
+                                class="settings-section"
+                                data-settings-panel="projects"
+                            >
+                                <h3>Проекты</h3>
+                                <div
+                                    id="settings-project-list"
+                                    class="settings-project-list"
+                                ></div>
+                            </section>
+                            <section
+                                class="settings-section"
+                                data-settings-panel="appearance"
+                                hidden
+                            >
+                                <h3>Оформление</h3>
+                                <div class="theme-options" id="theme-options">
+                                    <button
+                                        type="button"
+                                        data-theme-option="terminal"
+                                    >
+                                        <span>Terminal</span>
+                                        <small>#22c55e / #f97316</small>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-theme-option="neon"
+                                    >
+                                        <span>Неон</span>
+                                        <small>#22d3ee / #a855f7</small>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-theme-option="moon"
+                                    >
+                                        <span>Moon</span>
+                                        <small>#f3f4f6 / #374151</small>
+                                    </button>
+                                </div>
+                            </section>
+                        </div>
                     </div>
                 </section>
             </div>

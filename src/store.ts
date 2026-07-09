@@ -191,6 +191,33 @@ export class Store {
     return { ...current, kind };
   }
 
+  updateProject(
+    id: string,
+    update: {
+      name?: string;
+      path?: string;
+      kind?: ProjectKind;
+    },
+  ): Project {
+    const current = this.getProject(id);
+    if (!current) throw new Error(`Project not found: ${id}`);
+    const next: Project = {
+      ...current,
+      name: update.name ?? current.name,
+      path: update.path ?? current.path,
+      kind: update.kind ?? current.kind,
+    };
+    this.db
+      .prepare("UPDATE projects SET name = ?, path = ?, kind = ? WHERE id = ?")
+      .run(next.name, next.path, next.kind, id);
+    return next;
+  }
+
+  deleteProject(id: string): boolean {
+    const result = this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+    return result.changes > 0;
+  }
+
   createSession(session: Session): Session {
     this.db
       .prepare(`

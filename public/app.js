@@ -35,6 +35,7 @@ const state = {
   liveRenderFrame: null,
   selectedSession: null,
   theme: storedTheme(),
+  settingsTab: "projects",
   showTechnical: localStorage.getItem("ronix-agent-technical") === "true",
   learningMode: localStorage.getItem("ronix-agent-learning-mode") || "course",
   progressTab: localStorage.getItem("ronix-agent-progress-tab") || "summary",
@@ -111,6 +112,7 @@ document.addEventListener("keydown", (event) => {
     setSettingsOpen(false);
     setGitOpen(false);
     closeLimits();
+    closeSettings();
     closeCreateProject();
   }
 });
@@ -137,6 +139,28 @@ document.addEventListener("click", (event) => {
 });
 
 const limitsModal = $("#limits-modal");
+const settingsModal = $("#settings-modal");
+
+function closeSettings() {
+  settingsModal.hidden = true;
+}
+
+function openSettings() {
+  setSidebarOpen(false);
+  renderSettingsProjects();
+  selectSettingsTab(state.settingsTab);
+  settingsModal.hidden = false;
+}
+
+function selectSettingsTab(tab) {
+  state.settingsTab = tab === "appearance" ? "appearance" : "projects";
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.settingsTab === state.settingsTab);
+  });
+  document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== state.settingsTab;
+  });
+}
 
 function closeLimits() {
   limitsModal.hidden = true;
@@ -240,6 +264,13 @@ document.querySelectorAll("[data-close-limits]").forEach((button) => {
   button.addEventListener("click", closeLimits);
 });
 $("#refresh-limits").addEventListener("click", () => void loadLimits(true));
+$("#show-settings").addEventListener("click", openSettings);
+document.querySelectorAll("[data-close-settings]").forEach((button) => {
+  button.addEventListener("click", closeSettings);
+});
+document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+  button.addEventListener("click", () => selectSettingsTab(button.dataset.settingsTab));
+});
 
 document.querySelectorAll("[data-theme-option]").forEach((button) => {
   button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
@@ -306,6 +337,7 @@ async function loadProjects() {
   );
   if (rememberedProject) $("#project").value = rememberedProject.id;
   rememberProject($("#project").value || null);
+  renderSettingsProjects();
   await loadSessions();
 }
 
@@ -404,6 +436,133 @@ function selectedProject() {
 
 function isLearningProject() {
   return selectedProject()?.kind === "learning";
+}
+
+function renderSettingsProjects() {
+  const container = $("#settings-project-list");
+  if (!container) return;
+  if (!state.projects.length) {
+    container.innerHTML = `<div class="settings-empty">Проекты ещё не добавлены.</div>`;
+    return;
+  }
+  container.innerHTML = state.projects.map((project) => `
+    <form class="settings-project" data-project-form="${escapeHtml(project.id)}">
+      <div class="settings-project-main">
+        <label>
+          <span>Название</span>
+          <input
+            name="name"
+            value="${escapeHtml(project.name)}"
+            autocomplete="off"
+            required
+          />
+        </label>
+        <label>
+          <span>Путь</span>
+          <input
+            name="path"
+            value="${escapeHtml(project.path)}"
+            autocomplete="off"
+            required
+          />
+        </label>
+      </div>
+      <div class="settings-project-meta">
+        <span>${escapeHtml(project.kind === "learning" ? "Учебный" : "Dev")}</span>
+        <code>${escapeHtml(project.id.slice(0, 8))}</code>
+      </div>
+      <div class="settings-project-actions">
+        <button type="submit">Сохранить</button>
+        ${project.kind === "learning"
+          ? ""
+          : `<button type="button" data-project-learning="${escapeHtml(project.id)}">Сделать учебным</button>`}
+        <button type="button" class="danger" data-project-remove="${escapeHtml(project.id)}">
+          Убрать из Ronix
+        </button>
+      </div>
+    </form>
+  `).join("");
+  container.querySelectorAll("[data-project-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void saveProjectSettings(form);
+    });
+  });
+  container.querySelectorAll("[data-project-learning]").forEach((button) => {
+    button.addEventListener("click", () => void makeProjectLearning(button.dataset.projectLearning));
+  });
+  container.querySelectorAll("[data-project-remove]").forEach((button) => {
+    button.addEventListener("click", () => void removeProjectFromRonix(button.dataset.projectRemove));
+  });
+}
+
+async function saveProjectSettings(form) {
+  const projectId = form.dataset.projectForm;
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  const name = form.elements.name.value.trim();
+  const path = form.elements.path.value.trim();
+  if (!name || !path) return;
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  try {
+    const { project: updated } = await api(`/api/projects/${encodeURIComponent(project.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, path }),
+    });
+    state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
+    rememberProject($("#project").value || updated.id);
+    await loadProjects();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function makeProjectLearning(projectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project || project.kind === "learning") return;
+  try {
+    const { project: updated } = await api(`/api/projects/${encodeURIComponent(project.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ kind: "learning" }),
+    });
+    state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
+    if ($("#project").value === updated.id) {
+      state.learningMode = "course";
+      localStorage.setItem("ronix-agent-learning-mode", state.learningMode);
+    }
+    rememberProject($("#project").value || updated.id);
+    await loadProjects();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function removeProjectFromRonix(projectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  if (
+    !confirm(
+      `Убрать ${project.name} из Ronix? Сессии и история Ronix будут удалены, папка проекта останется на диске.`,
+    )
+  ) {
+    return;
+  }
+  try {
+    const wasSelected = $("#project").value === project.id;
+    if (wasSelected) {
+      saveCurrentDraft();
+      resetProjectSessionView();
+      rememberProject(null);
+    }
+    await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+    state.projects = state.projects.filter((item) => item.id !== project.id);
+    await loadProjects();
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function refreshGitStatus(projectId = $("#project").value) {
@@ -947,7 +1106,6 @@ function renderSessions() {
   $("#sessions-label").textContent = learning ? "Учёба" : "Сессии";
   $("#session-count").textContent = learning ? "3" : String(state.sessions.length);
   $("#new-session").hidden = learning;
-  $("#enable-learning").hidden = !selectedProject() || learning;
   if (learning) {
     $("#sessions").innerHTML = `
       ${renderLearningModeButton("course", "Курс", "Теория, объяснения и движение по ROADMAP")}
@@ -2343,24 +2501,6 @@ $("#confirm-create-project").addEventListener("click", async () => {
     alert(error.message);
   } finally {
     button.disabled = false;
-  }
-});
-
-$("#enable-learning").addEventListener("click", async () => {
-  const project = selectedProject();
-  if (!project || project.kind === "learning") return;
-  try {
-    const { project: updated, learning } = await api(
-      `/api/projects/${encodeURIComponent(project.id)}/learning/enable`,
-      { method: "POST" },
-    );
-    state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
-    state.learning = learning;
-    state.learningMode = "course";
-    localStorage.setItem("ronix-agent-learning-mode", state.learningMode);
-    await loadProjects();
-  } catch (error) {
-    alert(error.message);
   }
 });
 

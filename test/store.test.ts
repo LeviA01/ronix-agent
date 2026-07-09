@@ -61,6 +61,27 @@ test("persists projects, sessions, and ordered events", () => {
     assert.equal(store.deleteSession("s1"), true);
     assert.equal(store.getSession("s1"), null);
     assert.deepEqual(store.listEvents("s1"), []);
+
+    const updated = store.updateProject("p1", {
+      name: "Renamed",
+      path: "/tmp/renamed",
+      kind: "learning",
+    });
+    assert.equal(updated.name, "Renamed");
+    assert.equal(updated.path, "/tmp/renamed");
+    assert.equal(updated.kind, "learning");
+    assert.deepEqual(store.getProject("p1"), updated);
+
+    store.createProject({
+      id: "p2",
+      name: "Second",
+      path: "/tmp/second",
+      kind: "dev",
+      createdAt: now,
+    });
+    assert.throws(() => store.updateProject("p2", { path: "/tmp/renamed" }), /constraint/i);
+    assert.equal(store.deleteProject("p1"), true);
+    assert.equal(store.getProject("p1"), null);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

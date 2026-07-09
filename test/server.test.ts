@@ -116,6 +116,85 @@ test("serves security headers, rejects foreign origins, and pages event history"
       customRoadmap,
     );
 
+    const managedRoot = join(projectRoot, "managed-api");
+    const movedRoot = join(projectRoot, "managed-moved");
+    mkdirSync(managedRoot);
+    mkdirSync(movedRoot);
+    const managedProject = await fetch(base + "/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ path: "managed-api" }),
+    });
+    assert.equal(managedProject.status, 201);
+    const managedProjectBody = await managedProject.json() as {
+      project: { id: string; name: string; path: string; kind: string };
+    };
+    const editedProject = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ name: "Managed renamed", path: "managed-moved" }),
+    });
+    assert.equal(editedProject.status, 200);
+    const editedProjectBody = await editedProject.json() as {
+      project: { name: string; path: string; kind: string };
+    };
+    assert.equal(editedProjectBody.project.name, "Managed renamed");
+    assert.equal(editedProjectBody.project.path, movedRoot);
+    assert.equal(editedProjectBody.project.kind, "dev");
+
+    const duplicateProjectPath = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ path: createdDevBody.project.path }),
+    });
+    assert.equal(duplicateProjectPath.status, 409);
+
+    const missingProjectPath = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ path: "missing-managed" }),
+    });
+    assert.equal(missingProjectPath.status, 409);
+
+    const managedSession = sessions.createSession(managedProjectBody.project.id);
+    store.updateSession(managedSession.id, {
+      status: "running",
+      activeTurnId: "turn-managed",
+    });
+    const activeProjectEdit = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ name: "Blocked" }),
+    });
+    assert.equal(activeProjectEdit.status, 409);
+    const activeProjectDelete = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "DELETE",
+      headers: { origin: base },
+    });
+    assert.equal(activeProjectDelete.status, 409);
+
+    store.updateSession(managedSession.id, {
+      status: "ready",
+      activeTurnId: null,
+    });
+    const learningViaPatch = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ kind: "learning" }),
+    });
+    assert.equal(learningViaPatch.status, 200);
+    assert.equal(store.getProject(managedProjectBody.project.id)?.kind, "learning");
+    assert.equal(existsSync(join(movedRoot, "learning", "ROADMAP.md")), true);
+
+    const removeProject = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
+      method: "DELETE",
+      headers: { origin: base },
+    });
+    assert.equal(removeProject.status, 204);
+    assert.equal(store.getProject(managedProjectBody.project.id), null);
+    assert.equal(store.getSession(managedSession.id), null);
+    assert.equal(existsSync(movedRoot), true);
+
     const learningRoot = join(projectRoot, "learning-api");
     mkdirSync(learningRoot);
     const createdLearning = await fetch(base + "/api/projects", {

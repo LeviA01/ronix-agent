@@ -112,6 +112,12 @@ export function createApplication(options: ApplicationOptions = {}): Application
     };
   }
 
+  function hasActiveProjectSessions(projectId: string): boolean {
+    return store.listSessions(projectId).some((session) =>
+      session.status === "running" || Boolean(session.activeTurnId)
+    );
+  }
+
   async function handleApi(
     request: IncomingMessage,
     response: ServerResponse,
@@ -236,6 +242,78 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
 
     if (
+      request.method === "PATCH"
+      && parts.length === 3
+      && parts[1] === "projects"
+      && parts[2]
+    ) {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      if (hasActiveProjectSessions(project.id)) {
+        throw new HttpError(409, "Stop active project sessions before editing the project");
+      }
+      const body = await readJson<{
+        name?: unknown;
+        path?: unknown;
+        kind?: unknown;
+      }>(request);
+      const update: {
+        name?: string;
+        path?: string;
+        kind?: ProjectKind;
+      } = {};
+      if (body.name !== undefined) {
+        update.name = requireString(body.name, "name").trim();
+      }
+      if (body.path !== undefined) {
+        const resolution = await resolveProjectPath(requireString(body.path, "path"), config.projectRoots);
+        if (!resolution.exists) {
+          json(response, 409, {
+            error: "Project directory does not exist",
+            code: "PROJECT_NOT_FOUND",
+            path: resolution.path,
+            folder: resolution.folder,
+          });
+          return true;
+        }
+        update.path = resolution.path;
+      }
+      if (body.kind !== undefined) update.kind = projectKind(body.kind);
+      if (Object.keys(update).length === 0) {
+        throw new HttpError(400, "No project fields were provided");
+      }
+      try {
+        const updated = store.updateProject(project.id, update);
+        if (project.kind !== "learning" && updated.kind === "learning") {
+          ensureLearningWorkspace(updated.path);
+          ensureLearningSessions(updated.id);
+        }
+        json(response, 200, { project: updated });
+      } catch (error) {
+        if (isSqliteConstraint(error)) throw new HttpError(409, "Project path is already registered");
+        throw error;
+      }
+      return true;
+    }
+
+    if (
+      request.method === "DELETE"
+      && parts.length === 3
+      && parts[1] === "projects"
+      && parts[2]
+    ) {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      if (hasActiveProjectSessions(project.id)) {
+        throw new HttpError(409, "Stop active project sessions before removing the project");
+      }
+      store.deleteProject(project.id);
+      response.writeHead(204);
+      response.end();
+      return true;
+    }
+
+    if (
       request.method === "POST"
       && parts[1] === "projects"
       && parts[2]
@@ -244,6 +322,9 @@ export function createApplication(options: ApplicationOptions = {}): Application
     ) {
       const project = store.getProject(parts[2]);
       if (!project) throw new HttpError(404, "Project not found");
+      if (project.kind !== "learning" && hasActiveProjectSessions(project.id)) {
+        throw new HttpError(409, "Stop active project sessions before enabling learning mode");
+      }
       ensureLearningWorkspace(project.path);
       const updated = project.kind === "learning"
         ? project
