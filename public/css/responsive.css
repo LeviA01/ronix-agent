@@ -627,36 +627,95 @@
     min-height: 44px;
   }
 
+  /* Progress / Успехи — full width, no horizontal overflow */
+  .events:has(.learning-dashboard) {
+    padding:
+      12px max(12px, env(safe-area-inset-right, 0px))
+      20px max(12px, env(safe-area-inset-left, 0px));
+    overflow-x: hidden;
+  }
+
   .learning-dashboard {
-    padding: 4px 0 20px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 12px;
+    padding: 0 0 12px;
   }
 
   .learning-dashboard-head {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 10px;
+    align-items: center;
+  }
+
+  .learning-dashboard-head h3 {
+    font-size: 18px;
+  }
+
+  .learning-sub {
+    font-size: 12px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .refresh-learning {
+    min-height: 40px;
+    padding: 0 12px;
   }
 
   .learning-tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
   }
 
-  .learning-tabs::-webkit-scrollbar {
-    display: none;
+  .learning-tabs button {
+    min-height: 40px;
+    font-size: 12px;
+    padding: 0 4px;
   }
 
   .learning-scoreboard {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    gap: 6px;
   }
 
   .learning-stat {
-    padding: 10px;
+    padding: 10px 8px;
   }
 
   .learning-stat strong {
     font-size: 18px;
+  }
+
+  .learning-stat small {
+    display: none;
+  }
+
+  .learning-grid,
+  .learning-grid-skills {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .learning-card {
+    padding: 12px;
+  }
+
+  .learning-current-stage {
+    font-size: 14px;
+  }
+
+  .learning-content {
+    max-height: min(62dvh, 520px);
+    padding: 12px;
+    font-size: 12px;
+  }
+
+  .learning-details > summary {
+    min-height: 48px;
   }
 
   /* Composer fixed to bottom, keyboard-safe */
@@ -772,7 +831,15 @@
   }
 
   .learning-scoreboard {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .learning-stat span {
+    font-size: 10px;
+  }
+
+  .learning-stat strong {
+    font-size: 16px;
   }
 
   .approval-actions button {
