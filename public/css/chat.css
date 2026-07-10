@@ -1,0 +1,340 @@
+
+
+.limit-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.limit-fill.warning {
+  background: var(--warning);
+}
+
+.limit-fill.danger {
+  background: var(--danger);
+}
+
+.limit-reset {
+  margin-top: 6px;
+}
+
+.usage-summary {
+  align-items: stretch;
+}
+
+.usage-stat {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.usage-stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.usage-stat strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.refresh-limits {
+  min-height: 42px;
+  margin: 0 20px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-soft);
+  background: var(--surface-hover);
+  font-size: 12px;
+}
+
+.refresh-limits:disabled {
+  opacity: .55;
+}
+
+.logout-button[hidden] {
+  display: none;
+}
+
+.logout-button {
+  min-height: 38px;
+  margin: 10px 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--muted-strong);
+  background: transparent;
+  font-size: 12px;
+}
+
+.logout-button:hover {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.chat {
+  position: relative;
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  grid-template-rows: 69px minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--chat-background);
+  background-size: var(--chat-background-size);
+}
+
+.chat::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  inset: 69px 0 0;
+  z-index: 0;
+  opacity: 0;
+}
+
+body[data-theme="neon"] .chat::before {
+  opacity: 1;
+  background:
+    radial-gradient(ellipse 60% 30% at 15% 0%, rgb(94 234 212 / 10%), transparent 55%),
+    radial-gradient(ellipse 50% 28% at 90% 0%, rgb(232 121 249 / 9%), transparent 50%),
+    linear-gradient(180deg, transparent, rgb(5 2 15 / 22%));
+  mix-blend-mode: normal;
+}
+
+body[data-theme="moon"] .chat::before {
+  opacity: 1;
+  background:
+    radial-gradient(ellipse 55% 28% at 50% 0%, rgb(199 210 232 / 7%), transparent 55%),
+    linear-gradient(180deg, transparent 0 78%, rgb(232 238 249 / 2%) 100%);
+}
+
+.chat.learning-project {
+  grid-template-rows: 69px minmax(0, 1fr) auto;
+}
+
+.chat-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 0 22px;
+  border-bottom: 1px solid rgb(var(--white-rgb) / 6%);
+  background: rgb(var(--terminal-black-rgb) / 86%);
+  backdrop-filter: blur(20px) saturate(130%);
+}
+
+.chat-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-head h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.session-meta-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.session-meta.running {
+  color: var(--accent-strong);
+}
+
+.session-meta.running .session-meta-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgb(var(--terminal-green-rgb) / 50%);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.session-meta.error .session-meta-dot {
+  background: var(--danger);
+}
+
+.session-meta.stopped {
+  color: var(--muted);
+}
+
+.session-settings {
+  position: absolute;
+  z-index: 24;
+  top: 78px;
+  right: 22px;
+  display: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: min(720px, calc(100% - 44px));
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: rgb(var(--panel-rgb) / 97%);
+  box-shadow: var(--panel-shadow);
+}
+
+.chat.settings-open .session-settings {
+  display: flex;
+}
+
+.setting-field {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.setting-field > span {
+  flex: 0 0 auto;
+}
+
+.setting-field select {
+  min-width: 0;
+  min-height: 34px;
+  border-radius: 9px;
+  padding: 0 28px 0 9px;
+  color: var(--text);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.model-field select {
+  width: 170px;
+}
+
+.effort-field select {
+  width: 110px;
+}
+
+.access-mode {
+  margin-right: auto;
+}
+
+.access-mode select {
+  width: 130px;
+}
+
+.access-mode.mode-read-only select {
+  border-color: var(--border-strong);
+}
+
+.access-mode.mode-danger-full-access select {
+  border-color: var(--attention);
+  color: var(--attention-strong);
+  background: var(--attention-soft);
+}
+
+.git-panel {
+  position: absolute;
+  z-index: 23;
+  top: 78px;
+  right: 22px;
+  display: grid;
+  gap: 10px;
+  width: min(760px, calc(100% - 44px));
+  max-height: min(560px, calc(100% - 120px));
+  overflow: auto;
+  padding: 10px 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: rgb(var(--panel-rgb) / 97%);
+  box-shadow: var(--panel-shadow);
+}
+
+.git-panel:not([hidden]) {
+  display: none;
+}
+
+.chat.git-open .git-panel:not([hidden]) {
+  display: grid;
+}
+
+.git-panel-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.git-panel h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.git-panel p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.git-action {
+  min-height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 0 12px;
+  color: var(--text-soft);
+  background: var(--surface-raised);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.git-action:not(:disabled):hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.git-action.primary {
+  border-color: var(--attention);
+  color: var(--accent-ink);
+  background: var(--attention);
+}
+
+.git-action.primary:not(:disabled):hover {
+  border-color: var(--attention-strong);
+  background: var(--attention-strong);
+}
+
+.git-sync {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.git-remote-state {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+}

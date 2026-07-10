@@ -1,0 +1,311 @@
+
+
+body[data-theme="neon"] .session-row.active {
+  border-color: var(--accent);
+  background:
+    linear-gradient(90deg, rgb(var(--terminal-green-rgb) / 14%), transparent 56%),
+    linear-gradient(135deg, rgb(var(--terminal-orange-rgb) / 10%), transparent 48%),
+    var(--surface-raised);
+  box-shadow:
+    inset 3px 0 var(--accent),
+    0 0 18px rgb(var(--terminal-green-rgb) / 10%);
+}
+
+body[data-theme="moon"] .session-row.active {
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(90deg, rgb(var(--white-rgb) / 5%), transparent 72%),
+    var(--surface-raised);
+  box-shadow: inset 3px 0 var(--text-soft);
+}
+
+.session {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text-soft);
+  background: transparent;
+  text-align: left;
+}
+
+.session-status {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.session-status.running {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgb(var(--terminal-green-rgb) / 50%);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.session-status.error {
+  background: var(--danger);
+}
+
+.session-title {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.session-options {
+  position: relative;
+}
+
+.session-options-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.session-options-button:hover,
+.session-options-button[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--border);
+}
+
+.session-menu {
+  position: absolute;
+  z-index: 20;
+  top: 30px;
+  right: 0;
+  width: 176px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 30px rgb(var(--terminal-black-rgb) / 35%);
+}
+
+.session-menu[hidden] {
+  display: none;
+}
+
+.delete-session,
+.stop-session,
+.resume-session {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+
+.stop-session,
+.resume-session {
+  color: var(--text-soft);
+}
+
+.stop-session:hover,
+.resume-session:hover {
+  background: var(--surface-hover);
+}
+
+.delete-session {
+  color: var(--attention-strong);
+}
+
+.delete-session:not(:disabled):hover {
+  background: var(--attention-soft);
+}
+
+.delete-session:disabled {
+  color: var(--muted);
+}
+
+.add-project {
+  margin: 10px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.add-project summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.add-project form {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.add-project form label {
+  color: var(--muted-strong);
+  font-size: 11px;
+}
+
+.project-root-hint {
+  overflow: hidden;
+  color: var(--muted);
+  font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.add-project button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--accent-ink);
+  background: var(--accent);
+  font-weight: 700;
+}
+
+.settings-button,
+.limits-button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 4px 0;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-soft);
+  background: var(--panel);
+  font-size: 12px;
+  text-align: left;
+}
+
+.settings-button:hover,
+.limits-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.settings-button span:last-child,
+.limits-button span:last-child {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.theme-options {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.theme-options button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-soft);
+  background: var(--surface);
+  text-align: left;
+}
+
+.theme-options button:hover,
+.theme-options button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.theme-options button::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-bottom: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22c55e, #f97316);
+}
+
+.theme-options [data-theme-option="neon"]::before {
+  background: linear-gradient(90deg, #22d3ee, #a855f7, #e11d48);
+}
+
+.theme-options [data-theme-option="moon"]::before {
+  background: linear-gradient(90deg, #030712, #374151, #f3f4f6);
+}
+
+.theme-options span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theme-options small {
+  color: var(--muted);
+  font: 10px/1.35 var(--mono);
+}
+
+.confirm-modal[hidden] {
+  display: none;
+}
+
+.confirm-modal {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgb(var(--terminal-black-rgb) / 72%);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 430px);
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 17px;
+  background: var(--surface-raised);
+  box-shadow: 0 24px 80px rgb(var(--terminal-black-rgb) / 55%);
+}
+
+.confirm-panel h2 {
+  margin: 0 0 13px;
+  font-size: 18px;
+}
+
+.confirm-panel p {
+  margin: 7px 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirm-panel strong {
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
