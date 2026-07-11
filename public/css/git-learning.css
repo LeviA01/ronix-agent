@@ -191,14 +191,7 @@
     border-right: 1px solid var(--border);
     border-bottom: 0;
     box-shadow: 18px 0 50px rgb(var(--terminal-black-rgb) / 42%);
-    transform: translateX(-105%);
-    transition: transform 180ms ease;
-    visibility: hidden;
-  }
-
-  .app-shell.sidebar-open .sidebar {
-    transform: translateX(0);
-    visibility: visible;
+    /* Transform/visibility owned by responsive.css + gesture JS */
   }
 
   .sidebar-backdrop {
@@ -209,12 +202,6 @@
     border: 0;
     opacity: 0;
     background: rgb(var(--terminal-black-rgb) / 58%);
-    transition: opacity 180ms ease;
-  }
-
-  .app-shell.sidebar-open .sidebar-backdrop {
-    display: block;
-    opacity: 1;
   }
 
   .brand {

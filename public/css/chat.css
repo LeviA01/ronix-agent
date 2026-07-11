@@ -125,9 +125,10 @@ body[data-theme="moon"] .chat::before {
   justify-content: flex-start;
   gap: 16px;
   padding: 0 22px;
-  border-bottom: 1px solid rgb(var(--white-rgb) / 6%);
-  background: rgb(var(--terminal-black-rgb) / 86%);
-  backdrop-filter: blur(20px) saturate(130%);
+  border-bottom: 0;
+  background: rgb(var(--panel-rgb) / 72%);
+  backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
 }
 
 .chat-title {

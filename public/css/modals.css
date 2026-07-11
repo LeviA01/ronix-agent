@@ -14,7 +14,10 @@
 
 .empty-action:hover {
   background: var(--attention-strong);
-  transform: translateY(-1px);
+}
+
+.empty-action:active {
+  transform: scale(0.97);
 }
 
 .message {
