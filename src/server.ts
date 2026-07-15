@@ -26,6 +26,7 @@ import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
 import {
   buildMaterialGenerationPrompt,
+  buildMaterialRepairPrompt,
   deleteTheoryMaterial,
   ensureTheoryMaterialsDirectory,
   listTheoryMaterials,
@@ -68,6 +69,7 @@ const SANDBOX_MODES = new Set<SandboxMode>([
   "danger-full-access",
 ]);
 const PROJECT_KINDS = new Set<ProjectKind>(["dev", "learning"]);
+const MAX_MATERIAL_REPAIR_ATTEMPTS = 2;
 
 export function createApplication(options: ApplicationOptions = {}): Application {
   const config = options.config ?? defaultConfig;
@@ -133,6 +135,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
     onDone(): void;
   }): () => void {
     let finished = false;
+    let repairAttempts = 0;
+    let repairStarting = false;
     let unsubscribe = () => {};
     const finish = (type: string, payload: unknown) => {
       if (finished) return;
@@ -140,6 +144,41 @@ export function createApplication(options: ApplicationOptions = {}): Application
       unsubscribe();
       input.onDone();
       sessions.emit(input.sessionId, type, payload);
+    };
+    const repair = async (validationError: string) => {
+      if (finished || repairStarting) return;
+      if (repairAttempts >= MAX_MATERIAL_REPAIR_ATTEMPTS) {
+        finish("material.generation.failed", {
+          materialId: input.materialId,
+          message: `Codex не исправил материал после ${MAX_MATERIAL_REPAIR_ATTEMPTS} попыток: ${validationError}`,
+          validationError,
+        });
+        return;
+      }
+      repairAttempts += 1;
+      repairStarting = true;
+      sessions.emit(input.sessionId, "material.generation.repairing", {
+        materialId: input.materialId,
+        attempt: repairAttempts,
+        maximumAttempts: MAX_MATERIAL_REPAIR_ATTEMPTS,
+        message: validationError,
+      });
+      try {
+        await sessions.startTurn(input.sessionId, buildMaterialRepairPrompt({
+          materialId: input.materialId,
+          validationError,
+          attempt: repairAttempts,
+          maximumAttempts: MAX_MATERIAL_REPAIR_ATTEMPTS,
+        }));
+      } catch (error) {
+        finish("material.generation.failed", {
+          materialId: input.materialId,
+          message: error instanceof Error ? error.message : String(error),
+          validationError,
+        });
+      } finally {
+        repairStarting = false;
+      }
     };
     unsubscribe = sessions.subscribe(input.sessionId, (event) => {
       if (event.type === "session.ready") {
@@ -150,10 +189,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
             revision: loaded.revision,
           });
         } catch (error) {
-          finish("material.generation.failed", {
-            materialId: input.materialId,
-            message: error instanceof Error ? error.message : String(error),
-          });
+          void repair(error instanceof Error ? error.message : String(error));
         }
       } else if (event.type === "session.error" || event.type === "turn.interrupted") {
         const payload = event.payload && typeof event.payload === "object"

@@ -78,6 +78,19 @@ export function handleEvent(event, initial = false) {
     state.materialGeneration = null;
     void loadTheoryMaterials().then(() => openTheoryMaterial(event.payload.materialId));
   } else if (
+    event.type === "material.generation.repairing"
+    && state.materialGeneration?.status === "running"
+    && (!state.materialGeneration?.materialId
+      || state.materialGeneration.materialId === event.payload.materialId)
+  ) {
+    state.materialGeneration = {
+      ...state.materialGeneration,
+      repairing: true,
+      repairAttempt: event.payload.attempt,
+      maximumRepairAttempts: event.payload.maximumAttempts,
+      message: event.payload.message,
+    };
+  } else if (
     event.type === "material.generation.failed"
     && state.materialGeneration?.status === "running"
   ) {

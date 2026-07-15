@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  buildMaterialRepairPrompt,
   listTheoryMaterials,
   loadTheoryMaterial,
   scoreTheoryMaterial,
@@ -86,4 +87,17 @@ test("scores answers server-side and excludes flashcards from percentage", () =>
 
   delete answers["card-1"];
   assert.throws(() => scoreTheoryMaterial(material, answers), /ещё не просмотрена/);
+});
+
+test("builds a bounded repair request for the same generated file", () => {
+  const prompt = buildMaterialRepairPrompt({
+    materialId: "material-1",
+    validationError: "Объясняющие блоки должны быть распределены между интерактивными",
+    attempt: 1,
+    maximumAttempts: 2,
+  });
+  assert.match(prompt, /learning\/theory\/materials\/material-1\.json/);
+  assert.match(prompt, /Объясняющие блоки должны быть распределены/);
+  assert.match(prompt, /1 из 2/);
+  assert.match(prompt, /не меняй никакие другие файлы/i);
 });

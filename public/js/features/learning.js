@@ -198,7 +198,12 @@ function renderGenerationStatus() {
   const generation = state.materialGeneration;
   if (!generation) return "";
   if (generation.status === "running") {
-    return `<div class="materials-notice working"><span></span><div><strong>Codex собирает набор</strong><p>Можно отвечать на запросы доступа ниже. После проверки материал откроется автоматически.</p></div></div>`;
+    const repairing = generation.repairing;
+    const title = repairing ? "Codex исправляет JSON" : "Codex собирает набор";
+    const description = repairing
+      ? `Валидатор нашёл ошибку: ${generation.message || "неверная структура"}. Попытка ${generation.repairAttempt || 1} из ${generation.maximumRepairAttempts || 2}.`
+      : "Можно отвечать на запросы доступа ниже. После проверки материал откроется автоматически.";
+    return `<div class="materials-notice working"><span></span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div>`;
   }
   if (generation.status === "error") {
     return `<div class="materials-notice error"><div><strong>Материал не создан</strong><p>${escapeHtml(generation.message || "Ожидаемый JSON не прошёл проверку.")}</p></div><button type="button" data-retry-material>Повторить</button></div>`;

@@ -93,13 +93,42 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     assert.match(prompt, /LEARNING_DIARY\.md/);
     assert.match(prompt, /ровно 6 блоков/);
 
-    const material = theoryMaterialFixture(generation.materialId, "short");
-    writeFileSync(theoryMaterialPath(created.project.path, generation.materialId), JSON.stringify(material));
+    const invalidMaterial = theoryMaterialFixture(generation.materialId, "short");
+    const explanationIndex = invalidMaterial.blocks.findIndex((block) => block.id === "bridge");
+    const [trailingExplanation] = invalidMaterial.blocks.splice(explanationIndex, 1);
+    assert.ok(trailingExplanation);
+    invalidMaterial.blocks.push(trailingExplanation);
+    writeFileSync(
+      theoryMaterialPath(created.project.path, generation.materialId),
+      JSON.stringify(invalidMaterial),
+    );
     const session = store.getSession(generation.sessionId);
     assert.ok(session?.threadId && session.activeTurnId);
+    const firstTurnId = session.activeTurnId;
     codex.notify("turn/completed", {
       threadId: session.threadId,
       turn: { id: session.activeTurnId, status: "completed" },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const repairingSession = store.getSession(generation.sessionId);
+    assert.equal(repairingSession?.status, "running");
+    assert.notEqual(repairingSession?.activeTurnId, firstTurnId);
+    assert.ok(store.listEvents(generation.sessionId).some((event) =>
+      event.type === "material.generation.repairing"
+      && (event.payload as { message?: string }).message?.includes("Объясняющие блоки")
+    ));
+    const repairTurn = codex.calls.findLast((call) => call.method === "turn/start");
+    const repairPrompt = (repairTurn?.params as { input?: Array<{ text: string }> })?.input?.[0]?.text ?? "";
+    assert.match(repairPrompt, /Исправь уже созданный материал/);
+    assert.match(repairPrompt, /Объясняющие блоки должны быть распределены/);
+    assert.match(repairPrompt, /попытка исправления 1 из 2/i);
+
+    const material = theoryMaterialFixture(generation.materialId, "short");
+    writeFileSync(theoryMaterialPath(created.project.path, generation.materialId), JSON.stringify(material));
+    assert.ok(repairingSession?.threadId && repairingSession.activeTurnId);
+    codex.notify("turn/completed", {
+      threadId: repairingSession.threadId,
+      turn: { id: repairingSession.activeTurnId, status: "completed" },
     });
     assert.equal(store.getSession(generation.sessionId)?.status, "ready");
     assert.ok(store.listEvents(generation.sessionId).some((event) =>
@@ -169,6 +198,41 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     assert.equal(remove.status, 204);
     assert.equal(existsSync(theoryMaterialPath(created.project.path, generation.materialId)), false);
     assert.equal(store.getTheoryMaterialAttempt(projectId, generation.materialId, revision), null);
+
+    const turnsBeforeLimitCheck = codex.calls.filter((call) => call.method === "turn/start").length;
+    const limitedGenerate = await fetch(`${base}/api/projects/${projectId}/learning/materials/generate`, {
+      method: "POST",
+      headers: changing,
+      body: JSON.stringify({ topic: "Невалидный набор", size: "short" }),
+    });
+    assert.equal(limitedGenerate.status, 202);
+    const limited = await limitedGenerate.json() as { materialId: string; sessionId: string };
+    const alwaysInvalid = theoryMaterialFixture(limited.materialId, "short");
+    const middleExplanationIndex = alwaysInvalid.blocks.findIndex((block) => block.id === "bridge");
+    const [lastExplanation] = alwaysInvalid.blocks.splice(middleExplanationIndex, 1);
+    assert.ok(lastExplanation);
+    alwaysInvalid.blocks.push(lastExplanation);
+    writeFileSync(theoryMaterialPath(created.project.path, limited.materialId), JSON.stringify(alwaysInvalid));
+
+    for (let completion = 0; completion < 3; completion += 1) {
+      const current = store.getSession(limited.sessionId);
+      assert.ok(current?.threadId && current.activeTurnId);
+      codex.notify("turn/completed", {
+        threadId: current.threadId,
+        turn: { id: current.activeTurnId, status: "completed" },
+      });
+      if (completion < 2) await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(
+      codex.calls.filter((call) => call.method === "turn/start").length - turnsBeforeLimitCheck,
+      3,
+    );
+    assert.equal(store.getSession(limited.sessionId)?.status, "ready");
+    assert.ok(store.listEvents(limited.sessionId).some((event) =>
+      event.type === "material.generation.failed"
+      && (event.payload as { materialId?: string; message?: string }).materialId === limited.materialId
+      && (event.payload as { message?: string }).message?.includes("после 2 попыток")
+    ));
   } finally {
     await app.shutdown();
     rmSync(directory, { recursive: true, force: true });

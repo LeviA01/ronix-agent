@@ -324,6 +324,22 @@ export function buildMaterialGenerationPrompt(input: {
   return `Создай интерактивный материал по теме «${input.topic}».\nРазмер: ${input.size}, ровно ${count} блоков.${notes}\n\nОжидаемый файл: learning/theory/materials/${input.materialId}.json\n\nПеред созданием прочитай learning/LEARNING_DIARY.md и learning/ROADMAP.md, чтобы подобрать уровень, текущий фокус и слабые места. Запиши только ожидаемый JSON-файл и не изменяй никакие другие файлы.\n\nJSON обязан иметь поля version=1, id="${input.materialId}", title, topic, description, size="${input.size}", createdAt в ISO 8601 и blocks. Используй все типы блоков и распределяй объяснения между интерактивными блоками:\n- explanation: { id, type, title?, markdown }\n- choice: { id, type, prompt, options:[{id,text}], correctOptionId, explanation }\n- flashcard: { id, type, front, back }\n- matching: { id, type, prompt, left:[{id,text}], right:[{id,text}], pairs:[{leftId,rightId}], explanation }\n- ordering: { id, type, prompt, items:[{id,text}], correctOrder:[id], explanation }\n\nВсе id уникальны в своей области. Ссылки correctOptionId, pairs и correctOrder должны указывать на существующие элементы. Не используй HTML, JavaScript, CSS, внешние ссылки, изображения или медиа. Markdown допустим только в markdown объясняющих блоков: абзацы, списки, **жирный текст** и встроенный \`код\`. После записи файла не запускай и не изменяй исходный код проекта.`;
 }
 
+export function buildMaterialRepairPrompt(input: {
+  materialId: string;
+  validationError: string;
+  attempt: number;
+  maximumAttempts: number;
+}): string {
+  return [
+    `Исправь уже созданный материал learning/theory/materials/${input.materialId}.json.`,
+    `Сервер отклонил текущую версию: ${input.validationError}`,
+    `Это автоматическая попытка исправления ${input.attempt} из ${input.maximumAttempts}.`,
+    "Прочитай существующий JSON, устрани указанную ошибку и полностью проверь ссылки, уникальность id, число и порядок блоков.",
+    "Сохрани исправление по тому же пути. Не создавай новый материал и не меняй никакие другие файлы.",
+    "Ответ сообщением не заменяет исправление файла: итогом должен быть валидный JSON по исходной схеме Ronix.",
+  ].join("\n");
+}
+
 function validateBlock(value: unknown, index: number): TheoryMaterialBlock {
   const record = objectValue(value, `Блок ${index + 1} должен быть объектом`);
   const type = enumValue(
