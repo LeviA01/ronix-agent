@@ -24,6 +24,17 @@ import { moduleStatuses } from "./modules.js";
 import { createProjectDirectory, resolveProjectPath } from "./project-path.js";
 import { SessionManager } from "./session-manager.js";
 import { Store } from "./store.js";
+import {
+  buildMaterialGenerationPrompt,
+  deleteTheoryMaterial,
+  ensureTheoryMaterialsDirectory,
+  listTheoryMaterials,
+  loadTheoryMaterial,
+  scoreTheoryMaterial,
+  TheoryMaterialError,
+  THEORY_MATERIAL_BLOCK_COUNTS,
+  type TheoryMaterialSize,
+} from "./theory-materials.js";
 import type {
   CodexModel,
   Project,
@@ -76,6 +87,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
   let usagePending: Promise<unknown> | null = null;
   let modelCache: { value: CodexModel[]; expiresAt: number } | null = null;
   let modelPending: Promise<CodexModel[]> | null = null;
+  const generatingMaterials = new Set<string>();
 
   async function getUsage(force: boolean): Promise<unknown> {
     if (!force && usageCache && usageCache.expiresAt > Date.now()) return usageCache.value;
@@ -108,7 +120,60 @@ export function createApplication(options: ApplicationOptions = {}): Application
   function ensureLearningSessions(projectId: string): LearningSessions {
     return {
       course: sessions.ensurePurposeSession(projectId, "course"),
+      theory: sessions.ensurePurposeSession(projectId, "theory"),
       practice: sessions.ensurePurposeSession(projectId, "practice"),
+      materials: sessions.ensurePurposeSession(projectId, "materials"),
+    };
+  }
+
+  function monitorMaterialGeneration(input: {
+    project: Project;
+    materialId: string;
+    sessionId: string;
+    onDone(): void;
+  }): () => void {
+    let finished = false;
+    let unsubscribe = () => {};
+    const finish = (type: string, payload: unknown) => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      input.onDone();
+      sessions.emit(input.sessionId, type, payload);
+    };
+    unsubscribe = sessions.subscribe(input.sessionId, (event) => {
+      if (event.type === "session.ready") {
+        try {
+          const loaded = loadTheoryMaterial(input.project.path, input.materialId);
+          finish("material.generation.completed", {
+            materialId: input.materialId,
+            revision: loaded.revision,
+          });
+        } catch (error) {
+          finish("material.generation.failed", {
+            materialId: input.materialId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else if (event.type === "session.error" || event.type === "turn.interrupted") {
+        const payload = event.payload && typeof event.payload === "object"
+          ? event.payload as Record<string, unknown>
+          : {};
+        finish("material.generation.failed", {
+          materialId: input.materialId,
+          message: typeof payload.message === "string"
+            ? payload.message
+            : event.type === "turn.interrupted"
+              ? "Создание материала остановлено"
+              : "Codex не завершил создание материала",
+        });
+      }
+    });
+    return () => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      input.onDone();
     };
   }
 
@@ -373,7 +438,140 @@ export function createApplication(options: ApplicationOptions = {}): Application
       return true;
     }
 
-    if (request.method === "GET" && parts[1] === "projects" && parts[2] && parts[3] === "learning") {
+    if (
+      parts[1] === "projects"
+      && parts[2]
+      && parts[3] === "learning"
+      && parts[4] === "materials"
+    ) {
+      const project = store.getProject(parts[2]);
+      if (!project) throw new HttpError(404, "Project not found");
+      if (project.kind !== "learning") throw new HttpError(409, "Project is not in learning mode");
+
+      if (request.method === "GET" && parts.length === 5) {
+        const library = listTheoryMaterials(project.path, (materialId, revision) =>
+          store.getTheoryMaterialAttempt(project.id, materialId, revision)
+        );
+        json(response, 200, {
+          ...library,
+          generationSession: ensureLearningSessions(project.id).materials,
+        });
+        return true;
+      }
+
+      if (request.method === "POST" && parts[5] === "generate" && parts.length === 6) {
+        const body = await readJson<{ topic?: unknown; size?: unknown; notes?: unknown }>(request);
+        const topic = boundedText(body.topic, "topic", 160);
+        const notes = body.notes === undefined ? undefined : boundedText(body.notes, "notes", 1_000, true);
+        const size = materialSize(body.size);
+        if (generatingMaterials.has(project.id)) {
+          throw new HttpError(409, "Для проекта уже создаётся материал");
+        }
+        const learningSessions = ensureLearningSessions(project.id);
+        const generationSession = learningSessions.materials;
+        if (generationSession.status === "running" || generationSession.activeTurnId) {
+          throw new HttpError(409, "Для проекта уже создаётся материал");
+        }
+        if (generationSession.status === "stopped") sessions.resume(generationSession.id);
+        sessions.updateSettings(generationSession.id, {
+          sandboxMode: "workspace-write",
+          model: learningSessions.theory.model,
+          reasoningEffort: learningSessions.theory.reasoningEffort,
+        });
+        ensureTheoryMaterialsDirectory(project.path);
+        const materialId = randomUUID();
+        const prompt = buildMaterialGenerationPrompt({ materialId, topic, size, ...(notes ? { notes } : {}) });
+        generatingMaterials.add(project.id);
+        const unsubscribe = monitorMaterialGeneration({
+          project,
+          materialId,
+          sessionId: generationSession.id,
+          onDone: () => generatingMaterials.delete(project.id),
+        });
+        try {
+          await sessions.startTurn(generationSession.id, prompt);
+        } catch (error) {
+          unsubscribe();
+          generatingMaterials.delete(project.id);
+          throw sessionHttpError(error);
+        }
+        json(response, 202, { materialId, sessionId: generationSession.id });
+        return true;
+      }
+
+      const materialId = parts[5];
+      if (materialId && request.method === "GET" && parts.length === 6) {
+        try {
+          const loaded = loadTheoryMaterial(project.path, materialId);
+          const lastAttempt = store.getTheoryMaterialAttempt(project.id, materialId, loaded.revision);
+          json(response, 200, {
+            material: loaded.material,
+            revision: loaded.revision,
+            lastAttempt,
+            lastResult: lastAttempt
+              ? scoreTheoryMaterial(loaded.material, lastAttempt.answersByBlock)
+              : null,
+          });
+        } catch (error) {
+          throw materialHttpError(error);
+        }
+        return true;
+      }
+
+      if (materialId && request.method === "POST" && parts[6] === "attempt" && parts.length === 7) {
+        const body = await readJson<{ revision?: unknown; answersByBlock?: unknown }>(request);
+        const revision = boundedText(body.revision, "revision", 64);
+        let loaded;
+        try {
+          loaded = loadTheoryMaterial(project.path, materialId);
+        } catch (error) {
+          throw materialHttpError(error);
+        }
+        if (revision !== loaded.revision) {
+          throw new HttpError(409, "Материал изменился. Откройте актуальную версию и пройдите её заново.");
+        }
+        try {
+          const score = scoreTheoryMaterial(loaded.material, body.answersByBlock);
+          const completedAt = new Date().toISOString();
+          store.saveTheoryMaterialAttempt({
+            projectId: project.id,
+            materialId,
+            revision,
+            answersByBlock: body.answersByBlock as Record<string, unknown>,
+            correct: score.correct,
+            total: score.total,
+            completedAt,
+          });
+          json(response, 200, { ...score, completedAt });
+        } catch (error) {
+          throw materialHttpError(error);
+        }
+        return true;
+      }
+
+      if (materialId && request.method === "DELETE" && parts.length === 6) {
+        try {
+          if (!deleteTheoryMaterial(project.path, materialId)) {
+            throw new HttpError(404, "Материал не найден");
+          }
+          store.deleteTheoryMaterialAttempts(project.id, materialId);
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          throw materialHttpError(error);
+        }
+        response.writeHead(204);
+        response.end();
+        return true;
+      }
+    }
+
+    if (
+      request.method === "GET"
+      && parts.length === 4
+      && parts[1] === "projects"
+      && parts[2]
+      && parts[3] === "learning"
+    ) {
       const project = store.getProject(parts[2]);
       if (!project) throw new HttpError(404, "Project not found");
       const purposeSessions = project.kind === "learning"
@@ -785,6 +983,39 @@ function sessionHttpError(error: unknown): HttpError {
   return new HttpError(502, message);
 }
 
+function materialHttpError(error: unknown): HttpError {
+  if (error instanceof TheoryMaterialError) {
+    if (error.code === "NOT_FOUND") return new HttpError(404, error.message);
+    if (error.code === "TOO_LARGE") return new HttpError(413, error.message);
+    if (error.code === "INCOMPLETE_ATTEMPT") return new HttpError(400, error.message);
+    return new HttpError(422, error.message);
+  }
+  return new HttpError(500, error instanceof Error ? error.message : String(error));
+}
+
+function materialSize(value: unknown): TheoryMaterialSize {
+  if (typeof value !== "string" || !(value in THEORY_MATERIAL_BLOCK_COUNTS)) {
+    throw new HttpError(400, "size должен быть short, standard или deep");
+  }
+  return value as TheoryMaterialSize;
+}
+
+function boundedText(
+  value: unknown,
+  field: string,
+  maximum: number,
+  allowEmpty = false,
+): string {
+  if (typeof value !== "string") throw new HttpError(400, `${field} must be a string`);
+  const result = value.trim();
+  if (!allowEmpty && !result) throw new HttpError(400, `${field} must not be empty`);
+  if (result.length > maximum) throw new HttpError(400, `${field} is too long`);
+  if (/\p{Cc}/u.test(result.replaceAll("\n", "").replaceAll("\t", ""))) {
+    throw new HttpError(400, `${field} contains control characters`);
+  }
+  return result;
+}
+
 function isSqliteConstraint(error: unknown): boolean {
   return error instanceof Error && /constraint/i.test(error.message);
 }
@@ -803,7 +1034,9 @@ type LearningAssignment = {
 
 type LearningSessions = {
   course: Session;
+  theory: Session;
   practice: Session;
+  materials: Session;
 };
 
 const ROOT_LEARNING_AGENTS_TEMPLATE = `# Учебный проект Ronix
@@ -818,11 +1051,16 @@ AI-наставник, а не как обычный исполнитель за
 2. Ученик не редактирует оценки, дневник и маршрут вручную.
 3. Codex ведет \`learning/LEARNING_DIARY.md\` и \`learning/ROADMAP.md\`.
 4. В режиме курса объясняй темы и двигайся по \`learning/ROADMAP.md\`.
-5. В режиме практики проверяй код, задавай уточняющие вопросы и после
+5. В режиме теории закрывай конкретные пробелы без требования писать код,
+   проводи короткую проверку понимания и не меняй числовые оценки темы.
+6. В режиме практики проверяй код, задавай уточняющие вопросы и после
    завершенной практики обновляй дневник.
-6. Если маршрут устарел, скорректируй \`learning/ROADMAP.md\` с кратким
+7. Если маршрут устарел, скорректируй \`learning/ROADMAP.md\` с кратким
    основанием.
-7. Общение и учебные записи ведутся на русском языке.
+8. Общение и учебные записи ведутся на русском языке.
+9. Интерактивные материалы создаются только как безопасный JSON в
+   \`learning/theory/materials/\`; их результаты не влияют на дневник, оценки
+   или roadmap.
 
 Полные правила наставника находятся в \`learning/AGENTS.md\`.
 `;
@@ -832,7 +1070,7 @@ const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-настав�
 ## Роль
 
 Ты работаешь внутри учебного проекта Ronix. Проект создан не для обычной разработки,
-а для обучения пользователя через два долгоживущих диалога: курс и практика.
+а для обучения пользователя через три долгоживущих диалога: курс, теория и практика.
 
 ## Правила владения файлами
 
@@ -858,6 +1096,22 @@ const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-настав�
 В режиме курса объясняй темы, выбирай следующий блок по \`ROADMAP.md\`, задавай
 короткие проверочные вопросы и корректируй маршрут, если он устарел. Если меняешь
 roadmap, добавляй краткое основание в сам файл.
+
+## Теория
+
+В режиме теории помогай точечно закрывать пробелы без требования писать или
+запускать код. Объясняй через понятия, аналогии, разборы и короткие примеры для
+чтения. После объяснения задай по одному 2-4 коротких вопроса на воспроизведение.
+
+Теоретические ошибки не снижают основную числовую оценку темы. После проверки
+добавь или обнови в \`LEARNING_DIARY.md\` раздел \`## Теоретические разборы\`:
+тему, дату, статус \`разобрано\` или \`нужно повторить\` и краткое основание.
+Меняй roadmap только если найденный пробел действительно влияет на маршрут.
+
+Интерактивные материалы создавай только по прямому служебному заданию Ronix и
+только как один JSON-файл в \`learning/theory/materials/\`. Не добавляй HTML,
+JavaScript, CSS, внешние ссылки или медиа. Результаты прохождения материалов не
+переноси в \`LEARNING_DIARY.md\`, числовые оценки или \`ROADMAP.md\`.
 
 ## Практика
 
@@ -918,6 +1172,10 @@ const LEARNING_DIARY_TEMPLATE = `# Учебный дневник
 
 Завершенных заданий пока нет.
 
+## Теоретические разборы
+
+Проведенных разборов пока нет.
+
 ## Текущий учебный фокус
 
 1. Уточнить цель, уровень и формат практики.
@@ -953,6 +1211,7 @@ function ensureLearningWorkspace(projectPath: string): void {
   writeTemplateIfMissing(join(learningRoot, "AGENTS.md"), LEARNING_AGENTS_TEMPLATE);
   writeTemplateIfMissing(join(learningRoot, "LEARNING_DIARY.md"), LEARNING_DIARY_TEMPLATE);
   writeTemplateIfMissing(join(learningRoot, "ROADMAP.md"), LEARNING_ROADMAP_TEMPLATE);
+  ensureTheoryMaterialsDirectory(projectPath);
 }
 
 function writeTemplateIfMissing(path: string, content: string): void {

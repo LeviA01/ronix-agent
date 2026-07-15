@@ -197,6 +197,12 @@
                     </label>
                 </div>
                 <section id="git-panel" class="git-panel" hidden></section>
+                <nav
+                    id="theory-tabs"
+                    class="theory-tabs"
+                    aria-label="Разделы теории"
+                    hidden
+                ></nav>
 
                 <div
                     id="events"
@@ -212,19 +218,26 @@
                     </div>
                 </div>
 
-                <form id="prompt-form" class="composer" hidden>
-                    <textarea
-                        id="prompt"
-                        rows="1"
-                        placeholder="Напишите задачу для Codex…"
-                        required
-                    ></textarea>
-                    <button
-                        id="send"
-                        type="submit"
-                        disabled
-                        aria-label="Отправить"
-                    >
+                <div class="composer-shell">
+                    <div
+                        id="theory-suggestions"
+                        class="theory-suggestions"
+                        aria-label="Предложенные темы для разбора"
+                        hidden
+                    ></div>
+                    <form id="prompt-form" class="composer" hidden>
+                        <textarea
+                            id="prompt"
+                            rows="1"
+                            placeholder="Напишите задачу для Codex…"
+                            required
+                        ></textarea>
+                        <button
+                            id="send"
+                            type="submit"
+                            disabled
+                            aria-label="Отправить"
+                        >
                         <svg
                             width="800px"
                             height="800px"
@@ -247,8 +260,9 @@
                                 stroke-linejoin="round"
                             />
                         </svg>
-                    </button>
-                </form>
+                        </button>
+                    </form>
+                </div>
             </section>
             <button
                 id="sidebar-backdrop"

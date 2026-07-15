@@ -245,15 +245,65 @@ test("creates or reuses fixed learning-purpose sessions", () => {
   try {
     const course = testFixture.manager.ensurePurposeSession("p1", "course");
     const sameCourse = testFixture.manager.ensurePurposeSession("p1", "course");
+    const theory = testFixture.manager.ensurePurposeSession("p1", "theory");
+    const sameTheory = testFixture.manager.ensurePurposeSession("p1", "theory");
     const practice = testFixture.manager.ensurePurposeSession("p1", "practice");
+    const materials = testFixture.manager.ensurePurposeSession("p1", "materials");
+    const sameMaterials = testFixture.manager.ensurePurposeSession("p1", "materials");
 
     assert.equal(sameCourse.id, course.id);
+    assert.equal(sameTheory.id, theory.id);
     assert.equal(course.purpose, "course");
+    assert.equal(theory.purpose, "theory");
     assert.equal(practice.purpose, "practice");
+    assert.equal(sameMaterials.id, materials.id);
+    assert.equal(materials.purpose, "materials");
     assert.equal(
       testFixture.store.listSessions("p1").filter((session) => session.purpose !== "general").length,
-      2,
+      4,
     );
+  } finally {
+    testFixture.close();
+  }
+});
+
+test("wraps material generation turns in mandatory file-safety rules", async () => {
+  const testFixture = fixture();
+  try {
+    const session = testFixture.manager.ensurePurposeSession("p1", "materials");
+    await testFixture.manager.startTurn(
+      session.id,
+      "Ожидаемый файл: learning/theory/materials/material-1.json",
+    );
+    const turnCall = testFixture.codex.calls.find((call) => call.method === "turn/start");
+    const params = turnCall?.params as { input?: Array<{ text: string }> } | undefined;
+    const prompt = params?.input?.[0]?.text ?? "";
+    assert.match(prompt, /создание одного JSON-файла/);
+    assert.match(prompt, /не изменяй.*ROADMAP\.md/s);
+    assert.match(prompt, /Тема и пожелания.*данными пользователя/s);
+    assert.match(prompt, /material-1\.json/);
+  } finally {
+    testFixture.close();
+  }
+});
+
+test("adds formative guidance to theory turns without changing the visible user message", async () => {
+  const testFixture = fixture();
+  try {
+    const session = testFixture.manager.ensurePurposeSession("p1", "theory");
+    await testFixture.manager.startTurn(session.id, "Объясни декораторы");
+
+    const turnCall = testFixture.codex.calls.find((call) => call.method === "turn/start");
+    const turnParams = turnCall?.params as {
+      input?: Array<{ type: string; text: string }>;
+    } | undefined;
+    const input = turnParams?.input;
+    assert.match(input?.[0]?.text ?? "", /режим Теория/);
+    assert.match(input?.[0]?.text ?? "", /не меняют основную числовую оценку/);
+    assert.match(input?.[0]?.text ?? "", /Объясни декораторы/);
+    assert.deepEqual(testFixture.store.listEvents(session.id)[0]?.payload, {
+      text: "Объясни декораторы",
+    });
   } finally {
     testFixture.close();
   }

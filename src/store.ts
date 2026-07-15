@@ -9,6 +9,7 @@ import type {
   SessionPurpose,
   SessionStatus,
   StoredEvent,
+  TheoryMaterialAttempt,
 } from "./types.js";
 
 type ProjectRow = {
@@ -40,6 +41,16 @@ type EventRow = {
   type: string;
   payload: string;
   created_at: string;
+};
+
+type TheoryMaterialAttemptRow = {
+  project_id: string;
+  material_id: string;
+  revision: string;
+  answers_by_block: string;
+  correct: number;
+  total: number;
+  completed_at: string;
 };
 
 function projectFromRow(row: ProjectRow): Project {
@@ -76,6 +87,18 @@ function eventFromRow(row: EventRow): StoredEvent {
     type: row.type,
     payload: JSON.parse(row.payload) as unknown,
     createdAt: row.created_at,
+  };
+}
+
+function materialAttemptFromRow(row: TheoryMaterialAttemptRow): TheoryMaterialAttempt {
+  return {
+    projectId: row.project_id,
+    materialId: row.material_id,
+    revision: row.revision,
+    answersByBlock: JSON.parse(row.answers_by_block) as Record<string, unknown>,
+    correct: row.correct,
+    total: row.total,
+    completedAt: row.completed_at,
   };
 }
 
@@ -121,6 +144,17 @@ export class Store {
 
       CREATE INDEX IF NOT EXISTS events_session_sequence
       ON events(session_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS theory_material_attempts (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        material_id TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        answers_by_block TEXT NOT NULL,
+        correct INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        completed_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, material_id, revision)
+      );
     `);
     this.migrate();
   }
@@ -152,9 +186,10 @@ export class Store {
       this.db.exec("ALTER TABLE sessions ADD COLUMN reasoning_effort TEXT");
     }
     this.db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS sessions_project_learning_purpose
+      DROP INDEX IF EXISTS sessions_project_learning_purpose;
+      CREATE UNIQUE INDEX sessions_project_learning_purpose
       ON sessions(project_id, purpose)
-      WHERE purpose IN ('course', 'practice')
+      WHERE purpose IN ('course', 'theory', 'practice', 'materials');
     `);
   }
 
@@ -450,6 +485,48 @@ export class Store {
     const result = this.db
       .prepare(`DELETE FROM events WHERE session_id = ? AND type IN (${placeholders})`)
       .run(sessionId, ...types);
+    return Number(result.changes);
+  }
+
+  getTheoryMaterialAttempt(
+    projectId: string,
+    materialId: string,
+    revision: string,
+  ): TheoryMaterialAttempt | null {
+    const row = this.db.prepare(`
+      SELECT project_id, material_id, revision, answers_by_block, correct, total, completed_at
+      FROM theory_material_attempts
+      WHERE project_id = ? AND material_id = ? AND revision = ?
+    `).get(projectId, materialId, revision) as TheoryMaterialAttemptRow | undefined;
+    return row ? materialAttemptFromRow(row) : null;
+  }
+
+  saveTheoryMaterialAttempt(attempt: TheoryMaterialAttempt): TheoryMaterialAttempt {
+    this.db.prepare(`
+      INSERT INTO theory_material_attempts (
+        project_id, material_id, revision, answers_by_block, correct, total, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, material_id, revision) DO UPDATE SET
+        answers_by_block = excluded.answers_by_block,
+        correct = excluded.correct,
+        total = excluded.total,
+        completed_at = excluded.completed_at
+    `).run(
+      attempt.projectId,
+      attempt.materialId,
+      attempt.revision,
+      JSON.stringify(attempt.answersByBlock),
+      attempt.correct,
+      attempt.total,
+      attempt.completedAt,
+    );
+    return attempt;
+  }
+
+  deleteTheoryMaterialAttempts(projectId: string, materialId: string): number {
+    const result = this.db.prepare(`
+      DELETE FROM theory_material_attempts WHERE project_id = ? AND material_id = ?
+    `).run(projectId, materialId);
     return Number(result.changes);
   }
 }

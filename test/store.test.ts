@@ -167,3 +167,69 @@ test("migrates sessions created by version 0.1", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("enforces one fixed theory session per project after migration", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ronix-agent-theory-index-"));
+  const store = new Store(directory);
+  try {
+    const now = new Date().toISOString();
+    store.createProject({ id: "p1", name: "Learning", path: "/tmp/learning", kind: "learning", createdAt: now });
+    const theorySession = {
+      projectId: "p1",
+      purpose: "theory" as const,
+      threadId: null,
+      activeTurnId: null,
+      status: "ready" as const,
+      sandboxMode: "workspace-write" as const,
+      model: null,
+      reasoningEffort: null,
+      lastError: null,
+      createdAt: now,
+      lastActivityAt: now,
+    };
+    store.createSession({ id: "theory-1", ...theorySession });
+    assert.throws(
+      () => store.createSession({ id: "theory-2", ...theorySession }),
+      /constraint/i,
+    );
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("upserts the last attempt per material revision and deletes material history", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ronix-agent-material-attempt-"));
+  const store = new Store(directory);
+  try {
+    const now = new Date().toISOString();
+    store.createProject({ id: "p1", name: "Learning", path: "/tmp/attempt", kind: "learning", createdAt: now });
+    store.saveTheoryMaterialAttempt({
+      projectId: "p1",
+      materialId: "material-1",
+      revision: "rev-1",
+      answersByBlock: { choice: "a" },
+      correct: 1,
+      total: 2,
+      completedAt: "2026-07-15T10:00:00.000Z",
+    });
+    store.saveTheoryMaterialAttempt({
+      projectId: "p1",
+      materialId: "material-1",
+      revision: "rev-1",
+      answersByBlock: { choice: "b" },
+      correct: 2,
+      total: 2,
+      completedAt: "2026-07-15T11:00:00.000Z",
+    });
+    const current = store.getTheoryMaterialAttempt("p1", "material-1", "rev-1");
+    assert.deepEqual(current?.answersByBlock, { choice: "b" });
+    assert.equal(current?.correct, 2);
+    assert.equal(store.getTheoryMaterialAttempt("p1", "material-1", "rev-2"), null);
+    assert.equal(store.deleteTheoryMaterialAttempts("p1", "material-1"), 1);
+    assert.equal(store.getTheoryMaterialAttempt("p1", "material-1", "rev-1"), null);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

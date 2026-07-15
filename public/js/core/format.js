@@ -31,6 +31,7 @@ export function relativeTime(date) {
 
 export function sessionTitle(session) {
   if (session.purpose === "course") return "Курс";
+  if (session.purpose === "theory") return "Теория";
   if (session.purpose === "practice") return "Практика";
   return `Сессия ${session.id.slice(0, 8)}`;
 }

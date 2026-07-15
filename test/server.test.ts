@@ -98,9 +98,22 @@ test("serves security headers, rejects foreign origins, and pages event history"
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "AGENTS.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "LEARNING_DIARY.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "ROADMAP.md")), true);
+    assert.match(
+      readFileSync(join(createdDevBody.project.path, "learning", "AGENTS.md"), "utf8"),
+      /## Теория/,
+    );
+    assert.match(
+      readFileSync(join(createdDevBody.project.path, "learning", "LEARNING_DIARY.md"), "utf8"),
+      /## Теоретические разборы/,
+    );
     const customRoadmap = "# Custom roadmap\n";
     const customRootAgents = "# Custom root agents\n";
+    const customLearningAgents = "# Custom learning agents\n";
     writeFileSync(join(createdDevBody.project.path, "AGENTS.md"), customRootAgents);
+    writeFileSync(
+      join(createdDevBody.project.path, "learning", "AGENTS.md"),
+      customLearningAgents,
+    );
     writeFileSync(join(createdDevBody.project.path, "learning", "ROADMAP.md"), customRoadmap);
     const enableAgain = await fetch(
       `${base}/api/projects/${createdDevBody.project.id}/learning/enable`,
@@ -110,6 +123,10 @@ test("serves security headers, rejects foreign origins, and pages event history"
     assert.equal(
       readFileSync(join(createdDevBody.project.path, "AGENTS.md"), "utf8"),
       customRootAgents,
+    );
+    assert.equal(
+      readFileSync(join(createdDevBody.project.path, "learning", "AGENTS.md"), "utf8"),
+      customLearningAgents,
     );
     assert.equal(
       readFileSync(join(createdDevBody.project.path, "learning", "ROADMAP.md"), "utf8"),
@@ -279,6 +296,7 @@ test("serves security headers, rejects foreign origins, and pages event history"
       };
       sessions: {
         course: { id: string; purpose: string };
+        theory: { id: string; purpose: string };
         practice: { id: string; purpose: string };
       };
     };
@@ -301,14 +319,20 @@ test("serves security headers, rejects foreign origins, and pages event history"
     ]);
     assert.deepEqual(learningStateBody.roadmapSummary.completed, ["Настроить цель"]);
     assert.equal(learningStateBody.sessions.course.purpose, "course");
+    assert.equal(learningStateBody.sessions.theory.purpose, "theory");
     assert.equal(learningStateBody.sessions.practice.purpose, "practice");
     const repeatedLearningState = await fetch(
       `${base}/api/projects/${createdLearningBody.project.id}/learning`,
     );
     const repeatedLearningBody = await repeatedLearningState.json() as {
-      sessions: { course: { id: string }; practice: { id: string } };
+      sessions: {
+        course: { id: string };
+        theory: { id: string };
+        practice: { id: string };
+      };
     };
     assert.equal(repeatedLearningBody.sessions.course.id, learningStateBody.sessions.course.id);
+    assert.equal(repeatedLearningBody.sessions.theory.id, learningStateBody.sessions.theory.id);
     assert.equal(repeatedLearningBody.sessions.practice.id, learningStateBody.sessions.practice.id);
 
     const now = new Date().toISOString();

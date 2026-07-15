@@ -3,7 +3,12 @@ import { $ } from "../core/dom.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
 import { isLearningProject } from "../features/context.js";
-import { loadLearning, renderLearningDashboard } from "../features/learning.js";
+import {
+  bindTheoryMaterialsView,
+  loadLearning,
+  renderLearningDashboard,
+  renderTheoryMaterialsView,
+} from "../features/learning.js";
 import {
   formatTechnicalEvent,
   formatVisibleEvent,
@@ -238,6 +243,10 @@ function renderPendingApprovals(container) {
 
 export function appendVisibleEvent(event) {
   const container = $("#events");
+  if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
+    renderEvents(false);
+    return;
+  }
   container.querySelector(".empty-state")?.remove();
   const visible = state.showTechnical || visibleEvents([event]).length > 0;
   const shouldScroll = isNearBottom(container);
@@ -275,6 +284,13 @@ export function renderEvents(scrollToBottom = true) {
     });
     return;
   }
+  if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
+    container.innerHTML = renderTheoryMaterialsView();
+    bindTheoryMaterialsView(container);
+    const approvalsHost = container.querySelector("[data-materials-approvals]");
+    if (approvalsHost) renderPendingApprovals(approvalsHost);
+    return;
+  }
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
   const hasApprovals = Object.keys(state.approvals).length > 0;
   if (events.length === 0 && !hasApprovals) {
@@ -282,20 +298,26 @@ export function renderEvents(scrollToBottom = true) {
     const hasSessions = state.sessions.length > 0;
     const learning = isLearningProject();
     const emptyTitle = state.sessionId
-      ? learning && state.learningMode === "practice" ? "Начните практику" : "Начните диалог"
+      ? learning && state.learningMode === "practice"
+        ? "Начните практику"
+        : learning && state.learningMode === "theory"
+          ? "Закройте пробел в теории"
+          : "Начните диалог"
       : !hasProject
         ? "Добавьте проект"
         : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
       ? learning && state.learningMode === "practice"
         ? "Отправьте код или вопрос по заданию в поле ниже."
-        : learning
-          ? "Продолжите курс в поле ниже."
+        : learning && state.learningMode === "theory"
+          ? "Выберите предложенную тему или задайте свой вопрос. Код писать не потребуется."
+          : learning
+            ? "Продолжите курс в поле ниже."
           : "Опишите задачу в поле ниже."
       : !hasProject
         ? "Укажите каталог проекта в боковой панели."
         : learning
-          ? "Курс и практика сохраняются в отдельных долгоживущих сессиях."
+          ? "Курс, теория и практика сохраняются в отдельных долгоживущих сессиях."
           : hasSessions
           ? "Выберите существующую сессию в боковой панели."
           : "Создайте первую сессию, чтобы начать работу с Codex.";

@@ -2,7 +2,12 @@ import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api, headers } from "../core/api.js";
 import { isLearningProject } from "../features/context.js";
-import { loadLearning } from "../features/learning.js";
+import {
+  loadLearning,
+  loadTheoryMaterials,
+  openTheoryMaterial,
+  renderTheorySuggestions,
+} from "../features/learning.js";
 import {
   isLiveEvent,
   isSessionStateEvent,
@@ -41,12 +46,13 @@ async function refreshSelectedSession() {
   renderSessionMeta(session);
   if (isLearningProject()) {
     const purpose = session.purpose;
-    if (purpose === "course" || purpose === "practice") {
+    if (["course", "theory", "practice", "materials"].includes(purpose)) {
       state.learning ??= {};
       state.learning.sessions ??= {};
       state.learning.sessions[purpose] = session;
       state.sessions = [
         state.learning.sessions.course,
+        state.learning.sessions.theory,
         state.learning.sessions.practice,
       ].filter(Boolean);
       renderSessions();
@@ -63,6 +69,20 @@ export function handleEvent(event, initial = false) {
   state.events.push(event);
   updateApprovalState(event);
   updateLiveResponse(event);
+  if (
+    event.type === "material.generation.completed"
+    && state.materialGeneration?.status === "running"
+    && (!state.materialGeneration?.materialId
+      || state.materialGeneration.materialId === event.payload.materialId)
+  ) {
+    state.materialGeneration = null;
+    void loadTheoryMaterials().then(() => openTheoryMaterial(event.payload.materialId));
+  } else if (
+    event.type === "material.generation.failed"
+    && state.materialGeneration?.status === "running"
+  ) {
+    state.materialGeneration = { status: "error", message: event.payload.message };
+  }
   if (event.type === "approval.requested" || event.type === "approval.resolved") {
     renderEvents();
   } else if (isLiveEvent(event)) {
@@ -73,10 +93,10 @@ export function handleEvent(event, initial = false) {
   if (isSessionStateEvent(event)) scheduleSessionRefresh();
   if (
     isLearningProject()
-    && ["course", "practice"].includes(state.learningMode)
+    && ["course", "theory", "practice"].includes(state.learningMode)
     && event.type === "codex.turn.completed"
   ) {
-    void loadLearning();
+    void loadLearning().then(() => renderTheorySuggestions());
   }
   if (initial && state.events.length === 200) {
     state.hasMoreEvents = true;

@@ -315,6 +315,7 @@
 
   .settings-content {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
     flex: 1;
   }
@@ -767,6 +768,16 @@
     box-shadow:
       0 12px 36px rgb(var(--terminal-black-rgb) / 30%),
       inset 0 1px rgb(var(--white-rgb) / 3%);
+  }
+
+  .theory-suggestions {
+    width: calc(100% - 24px);
+    align-items: flex-start;
+    margin-bottom: 6px;
+  }
+
+  .theory-suggestions-label {
+    padding-top: 9px;
   }
 
   .composer:focus-within {

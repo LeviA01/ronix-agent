@@ -128,9 +128,10 @@
 }
 
 .settings-content {
-  align-content: start;
+  align-content: stretch;
   flex: 1;
   grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   min-height: 0;
   overflow: hidden;

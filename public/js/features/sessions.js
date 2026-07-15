@@ -23,6 +23,8 @@ import {
   loadLearning,
   renderLearningModeButton,
   renderLearningProgressMode,
+  renderTheoryTabs,
+  renderTheorySuggestions,
   selectLearningMode,
 } from "./learning.js";
 import { connectEvents } from "../events/stream.js";
@@ -59,6 +61,8 @@ export function resetProjectSessionView() {
 
 export function renderSessionMeta(session) {
   state.selectedSession = session;
+  renderTheoryTabs();
+  renderTheorySuggestions();
   const meta = $("#session-meta");
   if (!session) {
     const project = state.projects.find((item) => item.id === $("#project").value);
@@ -82,7 +86,7 @@ export function renderSessionMeta(session) {
     renderGitPanel();
     return;
   }
-  $("#session-title").textContent = sessionTitle(session);
+  $("#session-title").textContent = session.purpose === "materials" ? "Теория" : sessionTitle(session);
   meta.className = `session-meta ${session.status}`;
   const thread = session.threadId ? ` · ${session.threadId.slice(0, 8)}` : "";
   const learning = isLearningProject();
@@ -90,11 +94,14 @@ export function renderSessionMeta(session) {
     <span class="session-meta-dot"></span>
     <span>${escapeHtml(statusLabel(session.status) + (learning ? "" : thread))}</span>
   `;
-  $("#send").disabled = session.status === "running" || session.status === "stopped";
-  $("#prompt-form").hidden = false;
+  const materialMode = learning && session.purpose === "materials";
+  $("#send").disabled = materialMode || session.status === "running" || session.status === "stopped";
+  $("#prompt-form").hidden = materialMode;
   $("#prompt").placeholder = learning
     ? session.purpose === "practice"
       ? "Отправьте код или вопрос по практике…"
+      : session.purpose === "theory"
+        ? "Какой пробел в теории разберём?"
       : "Спросите тему или продолжите курс…"
     : "Напишите задачу для Codex…";
   $("#interrupt").disabled = session.status !== "running";
@@ -105,8 +112,8 @@ export function renderSessionMeta(session) {
   const accessMode = document.querySelector(".access-mode");
   accessMode.className =
     `setting-field access-mode mode-${session.sandboxMode ?? "workspace-write"}`;
-  $("#session-settings").hidden = false;
-  $("#toggle-settings").hidden = false;
+  $("#session-settings").hidden = materialMode;
+  $("#toggle-settings").hidden = materialMode;
   renderModelControls(session);
   renderGitPanel();
 }
@@ -115,11 +122,12 @@ export function renderSessions() {
   const learning = isLearningProject();
   getChat()?.classList.remove("learning-project");
   $("#sessions-label").textContent = learning ? "Учёба" : "Сессии";
-  $("#session-count").textContent = learning ? "3" : String(state.sessions.length);
+  $("#session-count").textContent = learning ? "4" : String(state.sessions.length);
   $("#new-session").hidden = learning;
   if (learning) {
     $("#sessions").innerHTML = `
       ${renderLearningModeButton("course", "Курс", "Теория, объяснения и движение по ROADMAP")}
+      ${renderLearningModeButton("theory", "Теория", "Разбор пробелов без написания кода")}
       ${renderLearningModeButton("practice", "Практика", "Сдача кода сообщением, ревью и дневник")}
       ${renderLearningModeButton("progress", "Успехи", "Дневник и дорожная карта только для чтения")}
     `;
@@ -314,11 +322,12 @@ export async function loadSessions() {
     await loadLearning(projectId);
     state.sessions = [
       state.learning?.sessions?.course,
+      state.learning?.sessions?.theory,
       state.learning?.sessions?.practice,
     ].filter(Boolean);
     renderSessions();
     if (state.gitProjectId !== projectId && !state.gitLoading) void refreshGitStatus(projectId);
-    if (!["course", "practice", "progress"].includes(state.learningMode)) {
+    if (!["course", "theory", "practice", "progress"].includes(state.learningMode)) {
       state.learningMode = "course";
     }
     if (state.learningMode === "progress") {
@@ -326,7 +335,10 @@ export async function loadSessions() {
       renderLearningProgressMode();
       return;
     }
-    const purposeSession = state.learning?.sessions?.[state.learningMode];
+    const purpose = state.learningMode === "theory" && state.theoryTab === "materials"
+      ? "materials"
+      : state.learningMode;
+    const purposeSession = state.learning?.sessions?.[purpose];
     if (purposeSession) {
       if (state.sessionId === purposeSession.id) {
         state.selectedSession = purposeSession;

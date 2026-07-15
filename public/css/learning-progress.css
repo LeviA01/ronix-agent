@@ -14,6 +14,62 @@
   white-space: nowrap;
 }
 
+.composer-shell {
+  display: grid;
+  min-width: 0;
+}
+
+.theory-suggestions {
+  display: flex;
+  width: min(880px, calc(100% - 48px));
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  margin: 0 auto 8px;
+}
+
+.theory-suggestions[hidden] {
+  display: none;
+}
+
+.theory-suggestions-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.theory-topic-list {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 1px 4px;
+  scrollbar-width: thin;
+}
+
+.theory-topic {
+  min-height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 11px;
+  color: var(--muted-strong);
+  background: var(--panel);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theory-topic:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.theory-topic:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
 .refresh-learning:hover {
   border-color: var(--border-strong);
   color: var(--text);

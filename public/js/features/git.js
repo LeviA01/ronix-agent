@@ -47,9 +47,10 @@ export function renderGitPanel() {
   const panel = $("#git-panel");
   const project = selectedProject();
   const session = state.selectedSession;
-  const progressMode = isLearningProject() && state.learningMode === "progress";
+  const hideForLearningMode = isLearningProject()
+    && ["theory", "progress"].includes(state.learningMode);
   if (!panel) return;
-  if (!project || progressMode) {
+  if (!project || hideForLearningMode) {
     panel.hidden = true;
     panel.innerHTML = "";
     if ($("#toggle-git")) $("#toggle-git").hidden = true;

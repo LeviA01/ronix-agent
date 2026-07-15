@@ -1,7 +1,7 @@
 export type SessionStatus = "ready" | "running" | "stopped" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ProjectKind = "dev" | "learning";
-export type SessionPurpose = "general" | "course" | "practice";
+export type SessionPurpose = "general" | "course" | "theory" | "practice" | "materials";
 
 export type ReasoningEffortOption = {
   reasoningEffort: string;
@@ -56,4 +56,14 @@ export type StoredEvent = {
   type: string;
   payload: unknown;
   createdAt: string;
+};
+
+export type TheoryMaterialAttempt = {
+  projectId: string;
+  materialId: string;
+  revision: string;
+  answersByBlock: Record<string, unknown>;
+  correct: number;
+  total: number;
+  completedAt: string;
 };
