@@ -97,6 +97,11 @@ export function updateLiveResponse(event) {
 export function renderLiveResponse(container = $("#events")) {
   if (!container) return;
   const existing = container.querySelector(".live-response");
+  if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
+    existing?.remove();
+    container.setAttribute("aria-busy", "false");
+    return;
+  }
   if (!state.liveResponse) {
     existing?.remove();
     container.setAttribute("aria-busy", "false");
