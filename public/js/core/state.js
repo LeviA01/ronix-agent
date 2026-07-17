@@ -40,7 +40,7 @@ export const state = {
   theoryMaterialDetail: null,
   theoryMaterialAnswers: {},
   theoryMaterialResult: null,
-  theoryMaterialUi: { flashcards: {}, matchingSelection: {} },
+  theoryMaterialUi: { flashcards: {}, matchingSelection: {}, matchingRightOrder: {} },
   materialGeneration: null,
   gitStatus: null,
   gitProjectId: null,

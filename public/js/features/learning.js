@@ -3,6 +3,7 @@ import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
+import { shuffledMatchingRightIds, shuffledOrderAvoiding } from "./material-randomization.js";
 import { clearPrompt, saveCurrentDraft, setPromptValue } from "./composer.js";
 import { renderGitPanel } from "./git.js";
 
@@ -270,7 +271,7 @@ export async function openTheoryMaterial(materialId) {
     state.theoryMaterialDetail = detail;
     state.theoryMaterialAnswers = structuredClone(detail.lastAttempt?.answersByBlock ?? {});
     state.theoryMaterialResult = detail.lastResult ?? null;
-    state.theoryMaterialUi = { flashcards: {}, matchingSelection: {} };
+    state.theoryMaterialUi = { flashcards: {}, matchingSelection: {}, matchingRightOrder: {} };
   } catch (error) {
     state.materialGeneration = { status: "error", message: error.message };
   }
@@ -404,7 +405,7 @@ function renderMaterialInline(text) {
 }
 
 function renderFlashcardBlock(block, index, total) {
-  const open = Boolean(state.theoryMaterialUi.flashcards[block.id] || state.theoryMaterialAnswers[block.id]);
+  const open = Boolean(state.theoryMaterialUi.flashcards[block.id]);
   return `
     <article class="material-block flashcard" data-block-id="${escapeHtml(block.id)}">
       <button type="button" class="flashcard-face" data-flashcard="${escapeHtml(block.id)}" aria-expanded="${open}">
@@ -441,6 +442,7 @@ function renderQuestionBlock(block, index, result) {
   if (block.type === "matching") {
     const mapping = state.theoryMaterialAnswers[block.id] ?? {};
     const selection = state.theoryMaterialUi.matchingSelection[block.id];
+    const rightItems = ensureMatchingRightItems(block);
     return `
       <article class="material-block matching${stateClass}" data-block-id="${escapeHtml(block.id)}">
         <div class="material-question"><span>${index + 1}</span><h4>${escapeHtml(block.prompt)}</h4></div>
@@ -452,7 +454,7 @@ function renderQuestionBlock(block, index, result) {
               ${mapping[item.id] ? `<small>${escapeHtml(block.right.find((right) => right.id === mapping[item.id])?.text || "")}</small>` : ""}
             </button>
           `).join("")}</div>
-          <div>${block.right.map((item) => `
+          <div>${rightItems.map((item) => `
             <button type="button" data-match-side="right" data-match-block="${escapeHtml(block.id)}" data-match-id="${escapeHtml(item.id)}" ${result || !selection ? "disabled" : ""}>
               ${escapeHtml(item.text)}
             </button>
@@ -512,9 +514,25 @@ function renderBlockFeedback(block, feedback) {
 function ensureOrderingAnswer(block) {
   const current = state.theoryMaterialAnswers[block.id];
   if (Array.isArray(current) && current.length === block.items.length) return current;
-  const initial = block.items.map((item) => item.id);
+  const initial = shuffledOrderAvoiding(
+    block.items.map((item) => item.id),
+    block.correctOrder,
+  );
   state.theoryMaterialAnswers[block.id] = initial;
   return initial;
+}
+
+function ensureMatchingRightItems(block) {
+  state.theoryMaterialUi.matchingRightOrder ??= {};
+  const itemById = new Map(block.right.map((item) => [item.id, item]));
+  const current = state.theoryMaterialUi.matchingRightOrder[block.id];
+  const validCurrent = Array.isArray(current)
+    && current.length === block.right.length
+    && current.every((id) => itemById.has(id))
+    && new Set(current).size === block.right.length;
+  const order = validCurrent ? current : shuffledMatchingRightIds(block);
+  if (!validCurrent) state.theoryMaterialUi.matchingRightOrder[block.id] = order;
+  return order.map((id) => itemById.get(id));
 }
 
 function isMaterialComplete(material) {
@@ -652,7 +670,7 @@ export function bindTheoryMaterialsView(container) {
   container.querySelector("[data-retake-material]")?.addEventListener("click", () => {
     state.theoryMaterialAnswers = {};
     state.theoryMaterialResult = null;
-    state.theoryMaterialUi = { flashcards: {}, matchingSelection: {} };
+    state.theoryMaterialUi = { flashcards: {}, matchingSelection: {}, matchingRightOrder: {} };
     rerenderMaterials();
   });
 }
