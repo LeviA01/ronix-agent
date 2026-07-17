@@ -21,6 +21,7 @@ import { renderGitPanel, resetGitStatus, refreshGitStatus } from "./git.js";
 import {
   clearSelectedSessionForProgress,
   loadLearning,
+  loadTheoryMaterials,
   renderLearningModeButton,
   renderLearningProgressMode,
   renderTheoryTabs,
@@ -350,6 +351,7 @@ export async function loadSessions() {
       renderSessionMeta(null);
       renderEvents();
     }
+    if (purpose === "materials") await loadTheoryMaterials(projectId);
     return;
   }
   state.learning = null;

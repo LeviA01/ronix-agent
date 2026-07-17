@@ -5,7 +5,6 @@ import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
 import { clearPrompt, saveCurrentDraft, setPromptValue } from "./composer.js";
 import { renderGitPanel } from "./git.js";
-import { renderMarkdownText } from "../events/markdown.js";
 
 export async function loadLearning(projectId = $("#project")?.value) {
   if (!projectId) {
@@ -168,14 +167,35 @@ export function renderTheoryMaterialsView() {
 
 function renderMaterialGenerator(open, running) {
   const suggested = suggestedMaterialTopic();
+  const topicMode = running && state.materialGeneration?.topicMode === "auto" ? "auto" : "manual";
+  const autoTopic = topicMode === "auto";
   return `
     <details class="material-generator" ${open ? "open" : ""}>
       <summary>Создать материал</summary>
-      <form data-material-generate>
-        <label>
-          <span>Тема</span>
-          <input name="topic" maxlength="160" value="${escapeHtml(suggested)}" placeholder="Например, замыкания в JavaScript" required ${running ? "disabled" : ""}>
-        </label>
+      <form data-material-generate data-running="${running}">
+        <fieldset class="material-topic-mode">
+          <legend>Кто выбирает тему</legend>
+          <div class="material-topic-options">
+            <label class="material-topic-option">
+              <input type="radio" name="topicMode" value="manual" ${autoTopic ? "" : "checked"} ${running ? "disabled" : ""}>
+              <span>Я выбираю</span>
+            </label>
+            <label class="material-topic-option">
+              <input type="radio" name="topicMode" value="auto" ${autoTopic ? "checked" : ""} ${running ? "disabled" : ""}>
+              <span>Codex выбирает</span>
+            </label>
+          </div>
+        </fieldset>
+        <div class="material-topic-manual" data-topic-manual ${autoTopic ? "hidden" : ""}>
+          <label>
+            <span>Тема</span>
+            <input name="topic" data-material-topic maxlength="160" value="${escapeHtml(suggested)}" placeholder="Например, замыкания в JavaScript" ${autoTopic || running ? "disabled" : "required"}>
+          </label>
+        </div>
+        <div class="material-topic-auto" data-topic-auto ${autoTopic ? "" : "hidden"}>
+          <strong>Codex выберет наиболее полезную тему</strong>
+          <span>Учтёт слабые места, текущий фокус, roadmap и уже созданные материалы.</span>
+        </div>
         <label>
           <span>Размер</span>
           <select name="size" ${running ? "disabled" : ""}>
@@ -199,7 +219,11 @@ function renderGenerationStatus() {
   if (!generation) return "";
   if (generation.status === "running") {
     const repairing = generation.repairing;
-    const title = repairing ? "Codex исправляет JSON" : "Codex собирает набор";
+    const title = repairing
+      ? "Codex исправляет JSON"
+      : generation.topicMode === "auto"
+        ? "Codex выбирает тему и собирает материал"
+        : "Codex собирает материал";
     const description = repairing
       ? `Валидатор нашёл ошибку: ${generation.message || "неверная структура"}. Попытка ${generation.repairAttempt || 1} из ${generation.maximumRepairAttempts || 2}.`
       : "Можно отвечать на запросы доступа ниже. После проверки материал откроется автоматически.";
@@ -258,6 +282,11 @@ function renderMaterialPlayer(detail) {
   const { material, revision } = detail;
   const result = state.theoryMaterialResult;
   const completed = Boolean(result);
+  const explanations = material.blocks.filter((block) => block.type === "explanation");
+  const flashcards = material.blocks.filter((block) => block.type === "flashcard");
+  const questions = material.blocks.filter((block) =>
+    block.type !== "explanation" && block.type !== "flashcard"
+  );
   return `
     <section class="materials-view material-player">
       <header class="material-player-head">
@@ -266,22 +295,57 @@ function renderMaterialPlayer(detail) {
           <h3>${escapeHtml(material.title)}</h3>
           <p>${escapeHtml(material.description || material.topic)}</p>
         </div>
-        <span>${material.blocks.length} блоков</span>
+        <span>${questions.length} вопросов</span>
       </header>
       ${completed ? `
         <div class="material-result ${result.percentage >= 70 ? "success" : "review"}">
           <strong>${result.percentage}%</strong>
-          <span>${result.correct} из ${result.total} интерактивных заданий</span>
+          <span>${result.correct} из ${result.total} вопросов</span>
           <button type="button" data-retake-material>Пройти ещё раз</button>
         </div>
       ` : ""}
       <form class="material-blocks" data-material-attempt data-revision="${escapeHtml(revision)}">
-        ${material.blocks.map((block, index) => renderMaterialBlock(block, index, result)).join("")}
-        <footer class="material-submit-bar">
+        <section class="material-flow-section material-theory" aria-labelledby="material-theory-title">
+          <header class="material-section-head">
+            <div>
+              <h4 id="material-theory-title">Теория</h4>
+              <p>Сначала разберите общую модель и примеры целиком.</p>
+            </div>
+            <span>${explanations.length} ${pluralize(explanations.length, "раздел", "раздела", "разделов")}</span>
+          </header>
+          <article class="material-theory-article">
+            ${explanations.map(renderExplanationBlock).join("")}
+          </article>
+        </section>
+        <section class="material-flow-section material-recall" aria-labelledby="material-recall-title">
+          <header class="material-section-head">
+            <div>
+              <h4 id="material-recall-title">Карточки для повторения</h4>
+              <p>Переверните каждую карточку перед проверкой знаний.</p>
+            </div>
+            <span>${flashcards.length}</span>
+          </header>
+          <div class="material-recall-grid">
+            ${flashcards.map((block, index) => renderFlashcardBlock(block, index, flashcards.length)).join("")}
+          </div>
+        </section>
+        <section class="material-flow-section material-assessment" aria-labelledby="material-assessment-title">
+          <header class="material-section-head">
+            <div>
+              <h4 id="material-assessment-title">Проверка знаний</h4>
+              <p>Ответьте без подсказок. После отправки Ronix покажет разбор.</p>
+            </div>
+            <span>${questions.length} ${pluralize(questions.length, "вопрос", "вопроса", "вопросов")}</span>
+          </header>
+          <div class="material-question-list">
+            ${questions.map((block, index) => renderQuestionBlock(block, index, result)).join("")}
+          </div>
+        </section>
+        <footer class="material-submit-bar${completed ? " is-complete" : ""}">
           <span>${completed ? "Сохранён последний результат этой версии" : materialProgress(material)}</span>
           ${completed
             ? `<button type="button" data-close-material>Готово</button>`
-            : `<button type="submit" ${isMaterialComplete(material) ? "" : "disabled"}>Проверить набор</button>`}
+            : `<button type="submit" ${isMaterialComplete(material) ? "" : "disabled"}>Проверить ответы</button>`}
         </footer>
       </form>
       <div class="materials-approvals" data-materials-approvals></div>
@@ -289,20 +353,74 @@ function renderMaterialPlayer(detail) {
   `;
 }
 
-function renderMaterialBlock(block, index, result) {
+function renderExplanationBlock(block) {
+  return `
+    <section class="material-theory-section" data-block-id="${escapeHtml(block.id)}">
+      ${block.title ? `<h5>${escapeHtml(block.title)}</h5>` : ""}
+      <div class="material-prose">${renderMaterialMarkdown(block.markdown)}</div>
+    </section>
+  `;
+}
+
+function renderMaterialMarkdown(markdown) {
+  const lines = String(markdown).replace(/\r\n?/g, "\n").split("\n");
+  const html = [];
+  let paragraph = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${paragraph.map(renderMaterialInline).join("<br>")}</p>`);
+    paragraph = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim()) {
+      flushParagraph();
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      flushParagraph();
+      const items = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      index -= 1;
+      html.push(`<ul>${items.map((item) => `<li>${renderMaterialInline(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+    paragraph.push(line.trim());
+  }
+
+  flushParagraph();
+  return html.join("");
+}
+
+function renderMaterialInline(text) {
+  return escapeHtml(text)
+    .replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function renderFlashcardBlock(block, index, total) {
+  const open = Boolean(state.theoryMaterialUi.flashcards[block.id] || state.theoryMaterialAnswers[block.id]);
+  return `
+    <article class="material-block flashcard" data-block-id="${escapeHtml(block.id)}">
+      <button type="button" class="flashcard-face" data-flashcard="${escapeHtml(block.id)}" aria-expanded="${open}">
+        <span class="flashcard-label">${open ? "Ответ" : `Карточка ${index + 1} из ${total}`}</span>
+        <strong>${escapeHtml(open ? block.back : block.front)}</strong>
+        <small>${open ? "Нажмите, чтобы вернуться к вопросу" : "Нажмите, чтобы перевернуть"}</small>
+      </button>
+    </article>
+  `;
+}
+
+function renderQuestionBlock(block, index, result) {
   const feedback = result?.resultsByBlock?.[block.id];
   const stateClass = feedback?.correct === true
     ? " correct"
     : feedback?.correct === false ? " incorrect" : "";
-  if (block.type === "explanation") {
-    return `
-      <article class="material-block explanation" data-block-id="${escapeHtml(block.id)}">
-        <span class="material-block-number">${index + 1}</span>
-        ${block.title ? `<h4>${escapeHtml(block.title)}</h4>` : ""}
-        <div class="material-prose">${renderMarkdownText(block.markdown)}</div>
-      </article>
-    `;
-  }
   if (block.type === "choice") {
     const answer = state.theoryMaterialAnswers[block.id];
     return `
@@ -318,19 +436,6 @@ function renderMaterialBlock(block, index, result) {
         </div>
         ${renderBlockFeedback(block, feedback)}
       </fieldset>
-    `;
-  }
-  if (block.type === "flashcard") {
-    const open = Boolean(state.theoryMaterialUi.flashcards[block.id] || state.theoryMaterialAnswers[block.id]);
-    return `
-      <article class="material-block flashcard" data-block-id="${escapeHtml(block.id)}">
-        <span class="material-block-number">${index + 1}</span>
-        <button type="button" class="flashcard-face" data-flashcard="${escapeHtml(block.id)}" aria-expanded="${open}">
-          <span class="flashcard-label">${open ? "Ответ" : "Карточка"}</span>
-          <strong>${escapeHtml(open ? block.back : block.front)}</strong>
-          <small>${open ? "Нажмите, чтобы вернуться к вопросу" : "Нажмите, чтобы перевернуть"}</small>
-        </button>
-      </article>
     `;
   }
   if (block.type === "matching") {
@@ -424,15 +529,27 @@ function isMaterialComplete(material) {
 }
 
 function materialProgress(material) {
-  const interactive = material.blocks.filter((block) => block.type !== "explanation");
-  const completed = interactive.filter((block) => {
+  const flashcards = material.blocks.filter((block) => block.type === "flashcard");
+  const viewedCards = flashcards.filter((block) => state.theoryMaterialAnswers[block.id] === true).length;
+  const questions = material.blocks.filter((block) =>
+    block.type !== "explanation" && block.type !== "flashcard"
+  );
+  const completedQuestions = questions.filter((block) => {
     const answer = state.theoryMaterialAnswers[block.id];
-    if (block.type === "flashcard") return answer === true;
     if (block.type === "choice") return typeof answer === "string";
     if (block.type === "matching") return answer && Object.keys(answer).length === block.left.length;
     return Array.isArray(answer) && answer.length === block.items.length;
   }).length;
-  return `${completed} из ${interactive.length} интерактивных блоков завершено`;
+  return `Карточки ${viewedCards}/${flashcards.length} · Ответы ${completedQuestions}/${questions.length}`;
+}
+
+function pluralize(count, one, few, many) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
 }
 
 export function bindTheoryMaterialsView(container) {
@@ -453,8 +570,28 @@ export function bindTheoryMaterialsView(container) {
     state.materialGeneration = null;
     const generator = container.querySelector(".material-generator");
     if (generator) generator.open = true;
-    generator?.querySelector("input")?.focus();
+    generator?.querySelector('input[name="topic"]')?.focus();
   });
+  const generatorForm = container.querySelector("[data-material-generate]");
+  const syncTopicMode = (focusTopic = false) => {
+    if (!generatorForm) return;
+    const auto = generatorForm.elements.topicMode?.value === "auto";
+    const running = generatorForm.dataset.running === "true";
+    const topicInput = generatorForm.querySelector("[data-material-topic]");
+    const manualPanel = generatorForm.querySelector("[data-topic-manual]");
+    const autoPanel = generatorForm.querySelector("[data-topic-auto]");
+    if (manualPanel) manualPanel.hidden = auto;
+    if (autoPanel) autoPanel.hidden = !auto;
+    if (topicInput) {
+      topicInput.disabled = running || auto;
+      topicInput.required = !auto;
+      if (focusTopic && !auto && !running) topicInput.focus();
+    }
+  };
+  generatorForm?.querySelectorAll('input[name="topicMode"]').forEach((input) => {
+    input.addEventListener("change", () => syncTopicMode(true));
+  });
+  syncTopicMode();
   container.querySelector("[data-material-generate]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void generateTheoryMaterial(new FormData(event.currentTarget));
@@ -527,7 +664,8 @@ function rerenderMaterials() {
 async function generateTheoryMaterial(formData) {
   const projectId = $("#project")?.value;
   if (!projectId) return;
-  state.materialGeneration = { status: "running" };
+  const topicMode = formData.get("topicMode") === "auto" ? "auto" : "manual";
+  state.materialGeneration = { status: "running", topicMode };
   rerenderMaterials();
   try {
     const result = await api(
@@ -535,15 +673,16 @@ async function generateTheoryMaterial(formData) {
       {
         method: "POST",
         body: JSON.stringify({
-          topic: formData.get("topic"),
+          topicMode,
+          topic: topicMode === "manual" ? formData.get("topic") : undefined,
           size: formData.get("size"),
           notes: formData.get("notes") || undefined,
         }),
       },
     );
-    state.materialGeneration = { status: "running", materialId: result.materialId };
+    state.materialGeneration = { status: "running", topicMode, materialId: result.materialId };
   } catch (error) {
-    state.materialGeneration = { status: "error", message: error.message };
+    state.materialGeneration = { status: "error", topicMode, message: error.message };
   }
   rerenderMaterials();
 }

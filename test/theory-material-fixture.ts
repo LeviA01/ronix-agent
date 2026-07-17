@@ -1,5 +1,8 @@
 import type { TheoryMaterialSize, TheoryMaterialV1 } from "../src/theory-materials.js";
-import { THEORY_MATERIAL_BLOCK_COUNTS } from "../src/theory-materials.js";
+import {
+  THEORY_MATERIAL_BLOCK_COUNTS,
+  THEORY_MATERIAL_GENERATION_PROFILES,
+} from "../src/theory-materials.js";
 
 export function theoryMaterialFixture(
   id = "material-1",
@@ -85,6 +88,59 @@ export function theoryMaterialFixture(
         correctOrder: ["create", "return", "call"],
         explanation: "Сначала создаётся окружение, затем функция возвращается и вызывается.",
       },
+    ],
+  };
+}
+
+export function generatedTheoryMaterialFixture(
+  id = "material-1",
+  size: TheoryMaterialSize = "standard",
+): TheoryMaterialV1 {
+  const material = theoryMaterialFixture(id, size);
+  const explanations = material.blocks.filter((block) => block.type === "explanation");
+  const baseFlashcard = material.blocks.find((block) => block.type === "flashcard");
+  const baseQuestions = material.blocks.filter((block) =>
+    block.type !== "explanation" && block.type !== "flashcard"
+  );
+  if (!baseFlashcard) throw new Error("Fixture must contain a flashcard");
+
+  const profile = THEORY_MATERIAL_GENERATION_PROFILES[size];
+  while (explanations.length < profile.explanations) {
+    const index = explanations.length + 1;
+    explanations.push({
+      id: `theory-${index}`,
+      type: "explanation",
+      title: `Раздел ${index}`,
+      markdown: `Связное объяснение раздела ${index}.`,
+    });
+  }
+  const flashcards = Array.from({ length: profile.flashcards }, (_, index) =>
+    index === 0
+      ? baseFlashcard
+      : {
+          id: `card-${index + 1}`,
+          type: "flashcard" as const,
+          front: `Ключевое понятие ${index + 1}`,
+          back: `Определение понятия ${index + 1}.`,
+        }
+  );
+  const questionCount = THEORY_MATERIAL_BLOCK_COUNTS[size]
+    - profile.explanations
+    - profile.flashcards;
+  const requiredQuestions = ["choice", "matching", "ordering"].map((type) => {
+    const block = baseQuestions.find((candidate) => candidate.type === type);
+    if (!block) throw new Error(`Fixture must contain a ${type} block`);
+    return block;
+  });
+  const requiredIds = new Set(requiredQuestions.map((block) => block.id));
+  const additionalQuestions = baseQuestions.filter((block) => !requiredIds.has(block.id));
+  return {
+    ...material,
+    blocks: [
+      ...explanations.slice(0, profile.explanations),
+      ...flashcards,
+      ...requiredQuestions,
+      ...additionalQuestions.slice(0, questionCount - requiredQuestions.length),
     ],
   };
 }

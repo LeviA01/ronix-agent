@@ -4,20 +4,84 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  buildMaterialGenerationPrompt,
   buildMaterialRepairPrompt,
   listTheoryMaterials,
   loadTheoryMaterial,
   scoreTheoryMaterial,
   theoryMaterialPath,
+  validateGeneratedTheoryMaterial,
   validateTheoryMaterial,
 } from "../src/theory-materials.js";
-import { correctTheoryAnswers, theoryMaterialFixture } from "./theory-material-fixture.js";
+import {
+  correctTheoryAnswers,
+  generatedTheoryMaterialFixture,
+  theoryMaterialFixture,
+} from "./theory-material-fixture.js";
+
+test("builds manual and automatic topic instructions", () => {
+  const manual = buildMaterialGenerationPrompt({
+    materialId: "manual-material",
+    topicMode: "manual",
+    topic: "Замыкания",
+    size: "short",
+  });
+  assert.match(manual, /Тема задана пользователем: «Замыкания»/);
+  assert.doesNotMatch(manual, /Сам выбери одну наиболее полезную тему/);
+
+  const automatic = buildMaterialGenerationPrompt({
+    materialId: "auto-material",
+    topicMode: "auto",
+    size: "standard",
+    notes: "Больше практических примеров",
+    existingTopics: ["Замыкания", "Замыкания", "Исключения"],
+  });
+  assert.match(automatic, /Сам выбери одну наиболее полезную тему/);
+  assert.match(automatic, /слабые места.+текущий учебный фокус.+roadmap/);
+  assert.match(automatic, /Не повторяй.+«Замыкания», «Исключения»/);
+  assert.match(automatic, /Запиши выбранную конкретную тему в поле topic/);
+  assert.match(automatic, /Дополнительные пожелания: Больше практических примеров/);
+});
 
 test("validates all block types and fixed material sizes", () => {
   for (const size of ["short", "standard", "deep"] as const) {
     const material = theoryMaterialFixture(`material-${size}`, size);
     assert.equal(validateTheoryMaterial(material).blocks.length, material.blocks.length);
   }
+});
+
+test("keeps legacy interleaving readable and validates the new generation flow separately", () => {
+  const legacy = theoryMaterialFixture("legacy-short", "short");
+  assert.equal(validateTheoryMaterial(legacy).blocks.length, 6);
+  assert.throws(
+    () => validateGeneratedTheoryMaterial(legacy),
+    /карточки должны идти после теории|объяснения должны идти перед карточками и вопросами/,
+  );
+
+  for (const size of ["short", "standard", "deep"] as const) {
+    const generated = generatedTheoryMaterialFixture(`generated-${size}`, size);
+    assert.equal(validateGeneratedTheoryMaterial(generated), generated);
+  }
+
+  const wrongProfile = generatedTheoryMaterialFixture("wrong-profile", "standard");
+  const explanationIndex = wrongProfile.blocks.findIndex((block) => block.type === "explanation");
+  const [explanation] = wrongProfile.blocks.splice(explanationIndex, 1);
+  assert.ok(explanation);
+  const firstQuestion = wrongProfile.blocks.findIndex((block) =>
+    block.type !== "explanation" && block.type !== "flashcard"
+  );
+  wrongProfile.blocks.splice(firstQuestion, 0, {
+    id: "extra-question",
+    type: "choice",
+    prompt: "Дополнительный вопрос",
+    options: [{ id: "yes", text: "Да" }, { id: "no", text: "Нет" }],
+    correctOptionId: "yes",
+    explanation: "Пояснение.",
+  });
+  assert.throws(
+    () => validateGeneratedTheoryMaterial(wrongProfile),
+    /3 объясняющих блоков, 2 карточек и 5 вопросов/,
+  );
 });
 
 test("rejects duplicate ids, invalid references, unsafe content, and wrong limits", () => {
@@ -92,12 +156,12 @@ test("scores answers server-side and excludes flashcards from percentage", () =>
 test("builds a bounded repair request for the same generated file", () => {
   const prompt = buildMaterialRepairPrompt({
     materialId: "material-1",
-    validationError: "Объясняющие блоки должны быть распределены между интерактивными",
+    validationError: "В новых материалах все объяснения должны идти перед карточками и вопросами",
     attempt: 1,
     maximumAttempts: 2,
   });
   assert.match(prompt, /learning\/theory\/materials\/material-1\.json/);
-  assert.match(prompt, /Объясняющие блоки должны быть распределены/);
+  assert.match(prompt, /объяснения должны идти перед карточками и вопросами/);
   assert.match(prompt, /1 из 2/);
   assert.match(prompt, /не меняй никакие другие файлы/i);
 });

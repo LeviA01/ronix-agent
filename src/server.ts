@@ -34,7 +34,9 @@ import {
   scoreTheoryMaterial,
   TheoryMaterialError,
   THEORY_MATERIAL_BLOCK_COUNTS,
+  validateGeneratedTheoryMaterial,
   type TheoryMaterialSize,
+  type TheoryMaterialTopicMode,
 } from "./theory-materials.js";
 import type {
   CodexModel,
@@ -184,6 +186,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       if (event.type === "session.ready") {
         try {
           const loaded = loadTheoryMaterial(input.project.path, input.materialId);
+          validateGeneratedTheoryMaterial(loaded.material);
           finish("material.generation.completed", {
             materialId: input.materialId,
             revision: loaded.revision,
@@ -496,8 +499,14 @@ export function createApplication(options: ApplicationOptions = {}): Application
       }
 
       if (request.method === "POST" && parts[5] === "generate" && parts.length === 6) {
-        const body = await readJson<{ topic?: unknown; size?: unknown; notes?: unknown }>(request);
-        const topic = boundedText(body.topic, "topic", 160);
+        const body = await readJson<{
+          topicMode?: unknown;
+          topic?: unknown;
+          size?: unknown;
+          notes?: unknown;
+        }>(request);
+        const topicMode = materialTopicMode(body.topicMode);
+        const topic = topicMode === "manual" ? boundedText(body.topic, "topic", 160) : undefined;
         const notes = body.notes === undefined ? undefined : boundedText(body.notes, "notes", 1_000, true);
         const size = materialSize(body.size);
         if (generatingMaterials.has(project.id)) {
@@ -516,7 +525,17 @@ export function createApplication(options: ApplicationOptions = {}): Application
         });
         ensureTheoryMaterialsDirectory(project.path);
         const materialId = randomUUID();
-        const prompt = buildMaterialGenerationPrompt({ materialId, topic, size, ...(notes ? { notes } : {}) });
+        const existingTopics = topicMode === "auto"
+          ? listTheoryMaterials(project.path, () => null).materials.map((material) => material.topic)
+          : [];
+        const prompt = buildMaterialGenerationPrompt({
+          materialId,
+          topicMode,
+          ...(topic ? { topic } : {}),
+          size,
+          ...(notes ? { notes } : {}),
+          ...(existingTopics.length ? { existingTopics } : {}),
+        });
         generatingMaterials.add(project.id);
         const unsubscribe = monitorMaterialGeneration({
           project,
@@ -1034,6 +1053,14 @@ function materialSize(value: unknown): TheoryMaterialSize {
     throw new HttpError(400, "size должен быть short, standard или deep");
   }
   return value as TheoryMaterialSize;
+}
+
+function materialTopicMode(value: unknown): TheoryMaterialTopicMode {
+  if (value === undefined) return "manual";
+  if (value !== "manual" && value !== "auto") {
+    throw new HttpError(400, "topicMode должен быть manual или auto");
+  }
+  return value;
 }
 
 function boundedText(

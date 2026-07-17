@@ -9,7 +9,11 @@ import { SessionManager } from "../src/session-manager.js";
 import { Store } from "../src/store.js";
 import { theoryMaterialPath } from "../src/theory-materials.js";
 import { FakeAppServer } from "./fake-app-server.js";
-import { correctTheoryAnswers, theoryMaterialFixture } from "./theory-material-fixture.js";
+import {
+  correctTheoryAnswers,
+  generatedTheoryMaterialFixture,
+  theoryMaterialFixture,
+} from "./theory-material-fixture.js";
 
 test("runs the material generation, attempt, revision, and delete API lifecycle", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "ronix-server-materials-"));
@@ -91,13 +95,19 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     const prompt = (turn?.params as { input?: Array<{ text: string }> })?.input?.[0]?.text ?? "";
     assert.match(prompt, new RegExp(`learning/theory/materials/${generation.materialId}\\.json`));
     assert.match(prompt, /LEARNING_DIARY\.md/);
+    assert.match(prompt, /Тема задана пользователем: «Замыкания»/);
     assert.match(prompt, /ровно 6 блоков/);
+    assert.match(prompt, /блоки explanation \(2 шт\.\)/);
+    assert.match(prompt, /блоки flashcard \(1 шт\.\)/);
+    assert.match(prompt, /оцениваемые вопросы \(3 шт\.\)/);
 
-    const invalidMaterial = theoryMaterialFixture(generation.materialId, "short");
-    const explanationIndex = invalidMaterial.blocks.findIndex((block) => block.id === "bridge");
-    const [trailingExplanation] = invalidMaterial.blocks.splice(explanationIndex, 1);
-    assert.ok(trailingExplanation);
-    invalidMaterial.blocks.push(trailingExplanation);
+    const invalidMaterial = generatedTheoryMaterialFixture(generation.materialId, "short");
+    const misplacedExplanationIndex = invalidMaterial.blocks.findLastIndex((block) =>
+      block.type === "explanation"
+    );
+    const [misplacedExplanation] = invalidMaterial.blocks.splice(misplacedExplanationIndex, 1);
+    assert.ok(misplacedExplanation);
+    invalidMaterial.blocks.push(misplacedExplanation);
     writeFileSync(
       theoryMaterialPath(created.project.path, generation.materialId),
       JSON.stringify(invalidMaterial),
@@ -115,15 +125,15 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     assert.notEqual(repairingSession?.activeTurnId, firstTurnId);
     assert.ok(store.listEvents(generation.sessionId).some((event) =>
       event.type === "material.generation.repairing"
-      && (event.payload as { message?: string }).message?.includes("Объясняющие блоки")
+      && (event.payload as { message?: string }).message?.includes("объяснения должны идти")
     ));
     const repairTurn = codex.calls.findLast((call) => call.method === "turn/start");
     const repairPrompt = (repairTurn?.params as { input?: Array<{ text: string }> })?.input?.[0]?.text ?? "";
     assert.match(repairPrompt, /Исправь уже созданный материал/);
-    assert.match(repairPrompt, /Объясняющие блоки должны быть распределены/);
+    assert.match(repairPrompt, /объяснения должны идти перед карточками и вопросами/);
     assert.match(repairPrompt, /попытка исправления 1 из 2/i);
 
-    const material = theoryMaterialFixture(generation.materialId, "short");
+    const material = generatedTheoryMaterialFixture(generation.materialId, "short");
     writeFileSync(theoryMaterialPath(created.project.path, generation.materialId), JSON.stringify(material));
     assert.ok(repairingSession?.threadId && repairingSession.activeTurnId);
     codex.notify("turn/completed", {
@@ -191,6 +201,50 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     assert.notEqual(revisedLibrary.materials[0]!.revision, revision);
     assert.equal(revisedLibrary.materials[0]!.lastAttempt, null);
 
+    const invalidTopicMode = await fetch(
+      `${base}/api/projects/${projectId}/learning/materials/generate`,
+      {
+        method: "POST",
+        headers: changing,
+        body: JSON.stringify({ topicMode: "random", size: "short" }),
+      },
+    );
+    assert.equal(invalidTopicMode.status, 400);
+
+    const automaticGenerate = await fetch(
+      `${base}/api/projects/${projectId}/learning/materials/generate`,
+      {
+        method: "POST",
+        headers: changing,
+        body: JSON.stringify({
+          topicMode: "auto",
+          size: "short",
+          notes: "Больше практических примеров",
+        }),
+      },
+    );
+    assert.equal(automaticGenerate.status, 202);
+    const automatic = await automaticGenerate.json() as { materialId: string; sessionId: string };
+    const automaticTurn = codex.calls.findLast((call) => call.method === "turn/start");
+    const automaticPrompt = (automaticTurn?.params as { input?: Array<{ text: string }> })
+      ?.input?.[0]?.text ?? "";
+    assert.match(automaticPrompt, /Сам выбери одну наиболее полезную тему/);
+    assert.match(automaticPrompt, /Не повторяй.+«Замыкания JavaScript»/);
+    assert.match(automaticPrompt, /Дополнительные пожелания: Больше практических примеров/);
+    const automaticMaterial = generatedTheoryMaterialFixture(automatic.materialId, "short");
+    automaticMaterial.topic = "Автоматически выбранная тема";
+    writeFileSync(
+      theoryMaterialPath(created.project.path, automatic.materialId),
+      JSON.stringify(automaticMaterial),
+    );
+    const automaticSession = store.getSession(automatic.sessionId);
+    assert.ok(automaticSession?.threadId && automaticSession.activeTurnId);
+    codex.notify("turn/completed", {
+      threadId: automaticSession.threadId,
+      turn: { id: automaticSession.activeTurnId, status: "completed" },
+    });
+    assert.equal(store.getSession(automatic.sessionId)?.status, "ready");
+
     const remove = await fetch(
       `${base}/api/projects/${projectId}/learning/materials/${generation.materialId}`,
       { method: "DELETE", headers: { origin: base } },
@@ -207,11 +261,13 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     });
     assert.equal(limitedGenerate.status, 202);
     const limited = await limitedGenerate.json() as { materialId: string; sessionId: string };
-    const alwaysInvalid = theoryMaterialFixture(limited.materialId, "short");
-    const middleExplanationIndex = alwaysInvalid.blocks.findIndex((block) => block.id === "bridge");
-    const [lastExplanation] = alwaysInvalid.blocks.splice(middleExplanationIndex, 1);
-    assert.ok(lastExplanation);
-    alwaysInvalid.blocks.push(lastExplanation);
+    const alwaysInvalid = generatedTheoryMaterialFixture(limited.materialId, "short");
+    const trailingExplanationIndex = alwaysInvalid.blocks.findLastIndex((block) =>
+      block.type === "explanation"
+    );
+    const [trailingExplanation] = alwaysInvalid.blocks.splice(trailingExplanationIndex, 1);
+    assert.ok(trailingExplanation);
+    alwaysInvalid.blocks.push(trailingExplanation);
     writeFileSync(theoryMaterialPath(created.project.path, limited.materialId), JSON.stringify(alwaysInvalid));
 
     for (let completion = 0; completion < 3; completion += 1) {

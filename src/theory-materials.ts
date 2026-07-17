@@ -17,7 +17,14 @@ export const THEORY_MATERIAL_BLOCK_COUNTS = {
   deep: 16,
 } as const;
 
+export const THEORY_MATERIAL_GENERATION_PROFILES = {
+  short: { explanations: 2, flashcards: 1, questions: 3 },
+  standard: { explanations: 3, flashcards: 2, questions: 5 },
+  deep: { explanations: 5, flashcards: 3, questions: 8 },
+} as const;
+
 export type TheoryMaterialSize = keyof typeof THEORY_MATERIAL_BLOCK_COUNTS;
+export type TheoryMaterialTopicMode = "manual" | "auto";
 
 type MaterialMeta = {
   version: 1;
@@ -222,16 +229,6 @@ export function validateTheoryMaterial(value: unknown, expectedId?: string): The
   for (const type of ["explanation", "choice", "flashcard", "matching", "ordering"] as const) {
     if (!types.has(type)) fail(`Набор должен содержать блок типа ${type}`);
   }
-  const interactiveIndexes = blocks
-    .map((block, index) => block.type === "explanation" ? -1 : index)
-    .filter((index) => index >= 0);
-  const firstInteractive = Math.min(...interactiveIndexes);
-  const lastInteractive = Math.max(...interactiveIndexes);
-  if (!blocks.some((block, index) =>
-    block.type === "explanation" && index > firstInteractive && index < lastInteractive
-  )) {
-    fail("Объясняющие блоки должны быть распределены между интерактивными");
-  }
 
   return {
     version: 1,
@@ -245,6 +242,42 @@ export function validateTheoryMaterial(value: unknown, expectedId?: string): The
     createdAt,
     blocks,
   };
+}
+
+export function validateGeneratedTheoryMaterial(material: TheoryMaterialV1): TheoryMaterialV1 {
+  const profile = THEORY_MATERIAL_GENERATION_PROFILES[material.size];
+  const explanations = material.blocks.filter((block) => block.type === "explanation").length;
+  const flashcards = material.blocks.filter((block) => block.type === "flashcard").length;
+  const questions = material.blocks.length - explanations - flashcards;
+  if (
+    explanations !== profile.explanations
+    || flashcards !== profile.flashcards
+    || questions !== profile.questions
+  ) {
+    fail(
+      `Размер ${material.size} должен содержать ${profile.explanations} объясняющих блоков, `
+      + `${profile.flashcards} карточек и ${profile.questions} вопросов`,
+    );
+  }
+
+  let phase: "theory" | "flashcards" | "questions" = "theory";
+  for (const block of material.blocks) {
+    if (block.type === "explanation") {
+      if (phase !== "theory") {
+        fail("В новых материалах все объяснения должны идти перед карточками и вопросами");
+      }
+      continue;
+    }
+    if (block.type === "flashcard") {
+      if (phase === "questions") {
+        fail("В новых материалах карточки должны идти после теории и перед вопросами");
+      }
+      phase = "flashcards";
+      continue;
+    }
+    phase = "questions";
+  }
+  return material;
 }
 
 export function scoreTheoryMaterial(
@@ -315,13 +348,29 @@ export function scoreTheoryMaterial(
 
 export function buildMaterialGenerationPrompt(input: {
   materialId: string;
-  topic: string;
+  topicMode: TheoryMaterialTopicMode;
+  topic?: string;
   size: TheoryMaterialSize;
   notes?: string;
+  existingTopics?: string[];
 }): string {
   const count = THEORY_MATERIAL_BLOCK_COUNTS[input.size];
+  const profile = THEORY_MATERIAL_GENERATION_PROFILES[input.size];
   const notes = input.notes?.trim() ? `\nДополнительные пожелания: ${input.notes.trim()}` : "";
-  return `Создай интерактивный материал по теме «${input.topic}».\nРазмер: ${input.size}, ровно ${count} блоков.${notes}\n\nОжидаемый файл: learning/theory/materials/${input.materialId}.json\n\nПеред созданием прочитай learning/LEARNING_DIARY.md и learning/ROADMAP.md, чтобы подобрать уровень, текущий фокус и слабые места. Запиши только ожидаемый JSON-файл и не изменяй никакие другие файлы.\n\nJSON обязан иметь поля version=1, id="${input.materialId}", title, topic, description, size="${input.size}", createdAt в ISO 8601 и blocks. Используй все типы блоков и распределяй объяснения между интерактивными блоками:\n- explanation: { id, type, title?, markdown }\n- choice: { id, type, prompt, options:[{id,text}], correctOptionId, explanation }\n- flashcard: { id, type, front, back }\n- matching: { id, type, prompt, left:[{id,text}], right:[{id,text}], pairs:[{leftId,rightId}], explanation }\n- ordering: { id, type, prompt, items:[{id,text}], correctOrder:[id], explanation }\n\nВсе id уникальны в своей области. Ссылки correctOptionId, pairs и correctOrder должны указывать на существующие элементы. Не используй HTML, JavaScript, CSS, внешние ссылки, изображения или медиа. Markdown допустим только в markdown объясняющих блоков: абзацы, списки, **жирный текст** и встроенный \`код\`. После записи файла не запускай и не изменяй исходный код проекта.`;
+  const existingTopics = [...new Set((input.existingTopics ?? []).map((topic) => topic.trim()).filter(Boolean))]
+    .slice(0, 50);
+  const topicInstruction = input.topicMode === "auto"
+    ? [
+        "Сам выбери одну наиболее полезную тему для этого материала.",
+        "Сначала учитывай слабые места из дневника, затем текущий учебный фокус, затем ближайший незавершённый шаг roadmap.",
+        "Если учебные файлы пока пусты, выбери полезную базовую тему, логически связанную с проектом.",
+        existingTopics.length
+          ? `Не повторяй и не перефразируй близко уже существующие темы материалов: ${existingTopics.map((topic) => `«${topic}»`).join(", ")}.`
+          : "В библиотеке ещё нет существующих тем для исключения.",
+        "Запиши выбранную конкретную тему в поле topic итогового JSON.",
+      ].join("\n")
+    : `Тема задана пользователем: «${input.topic}». Не заменяй её другой темой.`;
+  return `Создай интерактивный материал.\n${topicInstruction}\nРазмер: ${input.size}, ровно ${count} блоков.${notes}\n\nОжидаемый файл: learning/theory/materials/${input.materialId}.json\n\nПеред созданием прочитай learning/LEARNING_DIARY.md и learning/ROADMAP.md, чтобы подобрать уровень, текущий фокус и слабые места. Запиши только ожидаемый JSON-файл и не изменяй никакие другие файлы.\n\nJSON обязан иметь поля version=1, id="${input.materialId}", title, topic, description, size="${input.size}", createdAt в ISO 8601 и blocks. Построй цельный учебный поток строго в таком порядке:\n1. Сначала блоки explanation (${profile.explanations} шт.) — связная теория от основной модели к примерам, без вопросов между ними.\n2. Затем блоки flashcard (${profile.flashcards} шт.) — короткое повторение ключевых понятий.\n3. Затем оцениваемые вопросы (${profile.questions} шт.) типов choice, matching и ordering. В этой части должны присутствовать все три типа.\n\nФорматы блоков:\n- explanation: { id, type, title?, markdown }\n- flashcard: { id, type, front, back }\n- choice: { id, type, prompt, options:[{id,text}], correctOptionId, explanation }\n- matching: { id, type, prompt, left:[{id,text}], right:[{id,text}], pairs:[{leftId,rightId}], explanation }\n- ordering: { id, type, prompt, items:[{id,text}], correctOrder:[id], explanation }\n\nВсе id уникальны в своей области. Ссылки correctOptionId, pairs и correctOrder должны указывать на существующие элементы. Не используй HTML, JavaScript, CSS, внешние ссылки, изображения или медиа. Markdown допустим только в markdown объясняющих блоков: абзацы, списки, **жирный текст** и встроенный \`код\`. После записи файла не запускай и не изменяй исходный код проекта.`;
 }
 
 export function buildMaterialRepairPrompt(input: {

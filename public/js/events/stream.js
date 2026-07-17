@@ -94,7 +94,11 @@ export function handleEvent(event, initial = false) {
     event.type === "material.generation.failed"
     && state.materialGeneration?.status === "running"
   ) {
-    state.materialGeneration = { status: "error", message: event.payload.message };
+    state.materialGeneration = {
+      ...state.materialGeneration,
+      status: "error",
+      message: event.payload.message,
+    };
   }
   if (event.type === "approval.requested" || event.type === "approval.resolved") {
     renderEvents();
