@@ -1,6 +1,7 @@
 import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { storeJson } from "../core/storage.js";
 import { escapeHtml, relativeTime, sessionTitle, statusLabel } from "../core/format.js";
 import { getChat, setGitOpen, setSettingsOpen, setSidebarOpen } from "../layout/panels.js";
 import { isLearningProject } from "./context.js";
@@ -50,6 +51,7 @@ export function resetProjectSessionView() {
   state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
+  state.archivedMessages = [];
   state.gitStatus = null;
   state.gitProjectId = null;
   state.gitLoading = false;
@@ -66,7 +68,9 @@ export function renderSessionMeta(session) {
   renderTheorySuggestions();
   const meta = $("#session-meta");
   if (!session) {
-    const project = state.projects.find((item) => item.id === $("#project").value);
+    const project = state.surface === "projects"
+      ? state.projects.find((item) => item.id === $("#project").value)
+      : null;
     const hasSessions = state.sessions.length > 0;
     $("#session-title").textContent = project?.name ?? "Выберите проект";
     meta.className = "session-meta";
@@ -81,16 +85,18 @@ export function renderSessionMeta(session) {
     $("#toggle-git").hidden = true;
     $("#interrupt").hidden = true;
     $("#prompt-form").hidden = true;
+    $("#chat-composer-controls").hidden = true;
     $("#send").disabled = true;
     $("#sandbox-mode").disabled = true;
     renderModelControls(null);
     renderGitPanel();
     return;
   }
+  const chatSession = session.purpose === "chat";
   $("#session-title").textContent = session.purpose === "materials" ? "Теория" : sessionTitle(session);
   meta.className = `session-meta ${session.status}`;
   const thread = session.threadId ? ` · ${session.threadId.slice(0, 8)}` : "";
-  const learning = isLearningProject();
+  const learning = state.surface === "projects" && isLearningProject();
   meta.innerHTML = `
     <span class="session-meta-dot"></span>
     <span>${escapeHtml(statusLabel(session.status) + (learning ? "" : thread))}</span>
@@ -98,7 +104,9 @@ export function renderSessionMeta(session) {
   const materialMode = learning && session.purpose === "materials";
   $("#send").disabled = materialMode || session.status === "running" || session.status === "stopped";
   $("#prompt-form").hidden = materialMode;
-  $("#prompt").placeholder = learning
+  $("#prompt").placeholder = chatSession
+    ? "Спросите Ronix или выберите Act для работы в проекте…"
+    : learning
     ? session.purpose === "practice"
       ? "Отправьте код или вопрос по практике…"
       : session.purpose === "theory"
@@ -113,18 +121,27 @@ export function renderSessionMeta(session) {
   const accessMode = document.querySelector(".access-mode");
   accessMode.className =
     `setting-field access-mode mode-${session.sandboxMode ?? "workspace-write"}`;
-  $("#session-settings").hidden = materialMode;
-  $("#toggle-settings").hidden = materialMode;
+  $("#session-settings").hidden = materialMode || chatSession;
+  $("#toggle-settings").hidden = materialMode || chatSession;
+  $("#toggle-git").hidden = chatSession;
+  if (chatSession) {
+    import("./chats.js").then(({ renderChatIntentControls, renderChatProjectEditor }) => {
+      renderChatProjectEditor(session);
+      renderChatIntentControls();
+    });
+  } else {
+    $("#chat-composer-controls").hidden = true;
+  }
   renderModelControls(session);
   renderGitPanel();
 }
 
 export function renderSessions() {
-  const learning = isLearningProject();
+  const learning = state.surface === "projects" && isLearningProject();
   getChat()?.classList.remove("learning-project");
-  $("#sessions-label").textContent = learning ? "Учёба" : "Сессии";
+  $("#sessions-label").textContent = state.surface === "chat" ? "Чаты" : learning ? "Учёба" : "Сессии";
   $("#session-count").textContent = learning ? "4" : String(state.sessions.length);
-  $("#new-session").hidden = learning;
+  $("#new-session").hidden = learning || state.surface !== "projects";
   if (learning) {
     $("#sessions").innerHTML = `
       ${renderLearningModeButton("course", "Курс", "Теория, объяснения и движение по ROADMAP")}
@@ -243,17 +260,32 @@ export async function selectSession(id) {
   state.liveResponse = null;
   state.selectedSession = null;
   const projectId = $("#project").value;
-  if (projectId) rememberSession(projectId, id);
+  if (state.surface === "projects" && projectId) rememberSession(projectId, id);
+  if (state.surface === "chat") {
+    state.navigation.chatId = id;
+    storeJson("ronix-agent-navigation", state.navigation);
+  }
   renderEvents();
   renderSessions();
-  const { session, approvals = [] } = await api(`/api/sessions/${id}`);
-  const normalizedSession = await normalizeSessionModel(session);
+  const { session, approvals = [], lastSequence = 0 } = await api(`/api/sessions/${id}`);
+  const listedSession = state.sessions.find((item) => item.id === id);
+  const normalizedSession = {
+    ...(await normalizeSessionModel(session)),
+    ...(listedSession?.projectIds ? { projectIds: listedSession.projectIds } : {}),
+  };
+  if (normalizedSession.purpose === "chat") {
+    const archived = await api(`/api/sessions/${id}/messages?limit=500`);
+    state.archivedMessages = archived.messages;
+    state.lastSequence = lastSequence;
+  } else {
+    state.archivedMessages = [];
+  }
   for (const approval of approvals) state.approvals[approval.id] = approval;
   renderEvents();
   state.selectedSession = normalizedSession;
   renderSessionMeta(normalizedSession);
   restoreDraft(id);
-  connectEvents(id, true);
+  connectEvents(id, normalizedSession.purpose !== "chat");
 }
 
 async function changeSessionState(id, action) {
@@ -291,16 +323,26 @@ async function deleteSession(id) {
       state.approvals = {};
       state.liveTurnActive = false;
       state.liveResponse = null;
+      state.archivedMessages = [];
+      if (state.navigation.chatId === id) {
+        state.navigation.chatId = null;
+        storeJson("ronix-agent-navigation", state.navigation);
+      }
       clearPrompt();
       $("#session-title").textContent = "Выберите сессию";
       renderSessionMeta(null);
       $("#send").disabled = true;
       $("#interrupt").disabled = true;
       $("#sandbox-mode").disabled = true;
-      forgetSession(session.projectId);
+      if (session.projectId) forgetSession(session.projectId);
     }
 
-    await loadSessions();
+    if (state.surface === "chat") {
+      const { loadChats } = await import("./chats.js");
+      await loadChats();
+    } else {
+      await loadSessions();
+    }
     renderEvents();
   } catch (error) {
     alert(error.message);
@@ -308,6 +350,12 @@ async function deleteSession(id) {
 }
 
 export async function loadSessions() {
+  if (state.surface === "chat") {
+    const { loadChats } = await import("./chats.js");
+    await loadChats();
+    return;
+  }
+  if (state.surface === "memory") return;
   const projectId = $("#project").value;
   const project = state.projects.find((item) => item.id === projectId) ?? null;
   if (!projectId) {

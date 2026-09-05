@@ -10,6 +10,9 @@ import { closeSettings, bindSettings } from "./features/settings.js";
 import { closeCreateProject, bindProjects, loadProjects } from "./features/projects.js";
 import { bindSessions } from "./features/sessions.js";
 import { bindComposer } from "./features/composer.js";
+import { bindChats, setChatIntent } from "./features/chats.js";
+import { bindMemory } from "./features/memory.js";
+import { bindSurfaces, setSurface } from "./features/surfaces.js";
 import { loadModels, currentModel, updateSessionSettings } from "./features/models.js";
 import { bindEventActions } from "./events/stream.js";
 import { renderEvents } from "./events/render.js";
@@ -27,6 +30,9 @@ export async function bootstrap() {
   bindProjects();
   bindSessions();
   bindComposer({ setSettingsOpen });
+  bindChats();
+  bindMemory();
+  bindSurfaces();
   bindEventActions();
 
   $("#show-technical").checked = state.showTechnical;
@@ -78,13 +84,24 @@ export async function bootstrap() {
       $("#send").disabled = true;
       await api(`/api/sessions/${state.sessionId}/turns`, {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          ...(state.surface === "chat"
+            ? {
+                intent: state.chatIntent,
+                ...(state.chatIntent === "act"
+                  ? { actionProjectId: state.chatActionProjectId }
+                  : {}),
+              }
+            : {}),
+        }),
       });
       $("#prompt").value = "";
       delete state.drafts[state.sessionId];
       const { persistDrafts, resizePrompt } = await import("./features/composer.js");
       persistDrafts();
       resizePrompt();
+      if (state.surface === "chat") setChatIntent("ask");
     } catch (error) {
       alert(error.message);
       $("#send").disabled = false;
@@ -109,6 +126,7 @@ export async function bootstrap() {
   try {
     await loadModels();
     await loadProjects();
+    await setSurface(state.surface);
     setConnection("ready");
   } catch (error) {
     setConnection("error");

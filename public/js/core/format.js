@@ -30,6 +30,7 @@ export function relativeTime(date) {
 }
 
 export function sessionTitle(session) {
+  if (session.purpose === "chat") return session.title || `Чат ${session.id.slice(0, 8)}`;
   if (session.purpose === "course") return "Курс";
   if (session.purpose === "theory") return "Теория";
   if (session.purpose === "practice") return "Практика";

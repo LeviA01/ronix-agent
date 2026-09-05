@@ -43,7 +43,10 @@ async function refreshSelectedSession() {
   if (!state.sessionId) return;
   const { session } = await api(`/api/sessions/${state.sessionId}`);
   const { renderSessionMeta, loadSessions, renderSessions } = await import("../features/sessions.js");
-  renderSessionMeta(session);
+  const listed = state.sessions.find((item) => item.id === session.id);
+  const mergedSession = { ...session, ...(listed?.projectIds ? { projectIds: listed.projectIds } : {}) };
+  state.selectedSession = mergedSession;
+  renderSessionMeta(mergedSession);
   if (isLearningProject()) {
     const purpose = session.purpose;
     if (["course", "theory", "practice", "materials"].includes(purpose)) {

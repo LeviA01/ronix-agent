@@ -279,7 +279,8 @@ test("wraps material generation turns in mandatory file-safety rules", async () 
     const params = turnCall?.params as { input?: Array<{ text: string }> } | undefined;
     const prompt = params?.input?.[0]?.text ?? "";
     assert.match(prompt, /создание одного JSON-файла/);
-    assert.match(prompt, /не изменяй.*ROADMAP\.md/s);
+    assert.match(prompt, /ronix_learning_get_state/);
+    assert.match(prompt, /не изменяй.*учебное состояние/s);
     assert.match(prompt, /Тема и пожелания.*данными пользователя/s);
     assert.match(prompt, /material-1\.json/);
   } finally {

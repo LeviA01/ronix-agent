@@ -1,7 +1,11 @@
 export type SessionStatus = "ready" | "running" | "stopped" | "error";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ProjectKind = "dev" | "learning";
-export type SessionPurpose = "general" | "course" | "theory" | "practice" | "materials";
+export type SessionPurpose = "general" | "chat" | "course" | "theory" | "practice" | "materials";
+export type ChatIntent = "ask" | "act";
+export type MessageRole = "user" | "assistant";
+export type MemoryScopeType = "global" | "chat" | "project" | "learning";
+export type MemoryKind = "preference" | "fact" | "decision" | "task" | "summary";
 
 export type ReasoningEffortOption = {
   reasoningEffort: string;
@@ -29,8 +33,9 @@ export type Project = {
 
 export type Session = {
   id: string;
-  projectId: string;
+  projectId: string | null;
   purpose: SessionPurpose;
+  title?: string | null;
   threadId: string | null;
   activeTurnId: string | null;
   status: SessionStatus;
@@ -40,6 +45,62 @@ export type Session = {
   lastError: string | null;
   createdAt: string;
   lastActivityAt: string;
+};
+
+export type ArchivedMessage = {
+  id: string;
+  sessionId: string;
+  turnId: string | null;
+  role: MessageRole;
+  text: string;
+  createdAt: string;
+};
+
+export type MemoryItem = {
+  id: string;
+  scopeType: MemoryScopeType;
+  scopeId: string | null;
+  kind: MemoryKind;
+  content: string;
+  confidence: number;
+  sourceSessionId: string | null;
+  sourceTurnId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type LearningTopic = {
+  projectId: string;
+  title: string;
+  score: number;
+  confidence: number;
+  lastEvidence: string;
+  updatedAt: string;
+};
+
+export type LearningObservation = {
+  id: string;
+  projectId: string;
+  topic: string;
+  kind: "practice" | "theory" | "control" | "note";
+  scoreDelta: number;
+  resultScore: number | null;
+  rationale: string;
+  sourceSessionId: string | null;
+  createdAt: string;
+};
+
+export type LearningRoadmapItem = {
+  id: string;
+  projectId: string;
+  lane: "now" | "next" | "later";
+  title: string;
+  status: "todo" | "done" | "dropped";
+  position: number;
+  rationale: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PendingApproval = {

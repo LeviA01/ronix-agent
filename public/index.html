@@ -35,52 +35,65 @@
                     </button>
                 </div>
 
-                <div class="project-picker">
-                    <label for="project">Проект</label>
-                    <div class="project-row">
-                        <select id="project"></select>
-                        <button
-                            id="new-session"
-                            class="icon-button"
-                            title="Новая сессия"
-                            aria-label="Новая сессия"
-                        >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M12 5v14M5 12h14"></path>
-                            </svg>
-                        </button>
+                <nav class="primary-nav" aria-label="Главные разделы">
+                    <button type="button" data-surface="projects" class="active">Проекты</button>
+                    <button type="button" data-surface="chat">Чат</button>
+                    <button type="button" data-surface="memory">Память</button>
+                </nav>
+
+                <div id="project-navigation">
+                    <div class="project-picker">
+                        <label for="project">Проект</label>
+                        <div class="project-row">
+                            <select id="project"></select>
+                            <button
+                                id="new-session"
+                                class="icon-button"
+                                title="Новая сессия"
+                                aria-label="Новая сессия"
+                            >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 5v14M5 12h14"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
+                    <details class="add-project">
+                        <summary>Добавить проект</summary>
+                        <form id="project-form">
+                            <label for="project-folder">Папка в каталоге проектов</label>
+                            <div id="project-root-hint" class="project-root-hint"></div>
+                            <input
+                                id="project-folder"
+                                placeholder="veyra"
+                                autocomplete="off"
+                                required
+                            />
+                            <label class="project-kind-option">
+                                <input id="project-kind-learning" type="checkbox" />
+                                <span>Учебный проект</span>
+                            </label>
+                            <button type="submit">Добавить</button>
+                        </form>
+                    </details>
                 </div>
+
+                <section id="chat-projects-editor" class="chat-projects-editor" hidden>
+                    <div class="chat-projects-head">
+                        <span>Контекст чата</span>
+                        <small>явно подключённые проекты</small>
+                    </div>
+                    <div id="chat-project-options" class="chat-project-options"></div>
+                </section>
 
                 <div class="sessions-head">
                     <span id="sessions-label">Сессии</span>
-                    <span id="session-count" class="count">0</span>
+                    <div>
+                        <span id="session-count" class="count">0</span>
+                        <button id="new-chat" class="new-chat-button" type="button" hidden>Новый</button>
+                    </div>
                 </div>
                 <div id="sessions" class="session-list"></div>
-
-                <details class="add-project">
-                    <summary>Добавить проект</summary>
-                    <form id="project-form">
-                        <label for="project-folder"
-                            >Папка в каталоге проектов</label
-                        >
-                        <div
-                            id="project-root-hint"
-                            class="project-root-hint"
-                        ></div>
-                        <input
-                            id="project-folder"
-                            placeholder="veyra"
-                            autocomplete="off"
-                            required
-                        />
-                        <label class="project-kind-option">
-                            <input id="project-kind-learning" type="checkbox" />
-                            <span>Учебный проект</span>
-                        </label>
-                        <button type="submit">Добавить</button>
-                    </form>
-                </details>
 
                 <button id="show-settings" class="settings-button" type="button">
                     <span>Настройки Ronix</span>
@@ -218,13 +231,80 @@
                     </div>
                 </div>
 
-                <div class="composer-shell">
+                <section id="memory-view" class="memory-view" hidden>
+                    <header class="memory-head">
+                        <div>
+                            <p class="memory-kicker">Ronix Memory</p>
+                            <h2>Память</h2>
+                            <p>Решения, факты и предпочтения из проектов, учёбы и чатов.</p>
+                        </div>
+                        <div class="memory-transfer-actions">
+                            <button id="memory-export" type="button">Экспорт JSON</button>
+                            <button id="memory-import" type="button">Импорт JSON</button>
+                            <input id="memory-import-file" type="file" accept="application/json,.json" hidden />
+                        </div>
+                    </header>
+                    <div class="memory-toolbar">
+                        <input id="memory-search" type="search" placeholder="Поиск по памяти…" />
+                        <select id="memory-scope" aria-label="Область памяти">
+                            <option value="">Все области</option>
+                            <option value="global">Общее</option>
+                            <option value="project">Проекты</option>
+                            <option value="learning">Учёба</option>
+                            <option value="chat">Чаты</option>
+                        </select>
+                        <select id="memory-kind" aria-label="Тип памяти">
+                            <option value="">Все типы</option>
+                            <option value="preference">Предпочтения</option>
+                            <option value="fact">Факты</option>
+                            <option value="decision">Решения</option>
+                            <option value="task">Задачи</option>
+                            <option value="summary">Итоги</option>
+                        </select>
+                        <button id="memory-new" type="button">Новая запись</button>
+                    </div>
+                    <form id="memory-create-form" class="memory-create-form" hidden>
+                        <textarea id="memory-create-content" rows="3" placeholder="Что Ronix должен помнить?"></textarea>
+                        <div class="memory-create-fields">
+                            <select id="memory-create-scope">
+                                <option value="global">Общее</option>
+                                <option value="project">Проект</option>
+                                <option value="learning">Учёба</option>
+                                <option value="chat">Чат</option>
+                            </select>
+                            <select id="memory-create-scope-id"></select>
+                            <select id="memory-create-kind">
+                                <option value="fact">Факт</option>
+                                <option value="preference">Предпочтение</option>
+                                <option value="decision">Решение</option>
+                                <option value="task">Задача</option>
+                                <option value="summary">Итог</option>
+                            </select>
+                            <button type="submit">Сохранить</button>
+                            <button id="memory-create-cancel" type="button">Отмена</button>
+                        </div>
+                    </form>
+                    <div id="memory-results" class="memory-results"></div>
+                </section>
+
+                <div id="composer-shell" class="composer-shell">
                     <div
                         id="theory-suggestions"
                         class="theory-suggestions"
                         aria-label="Предложенные темы для разбора"
                         hidden
                     ></div>
+                    <div id="chat-composer-controls" class="chat-composer-controls" hidden>
+                        <div class="intent-switch" role="group" aria-label="Режим сообщения">
+                            <button type="button" data-chat-intent="ask" class="active">Ask</button>
+                            <button type="button" data-chat-intent="act">Act</button>
+                        </div>
+                        <label id="chat-action-project-label" hidden>
+                            <span>Выполнить в</span>
+                            <select id="chat-action-project"></select>
+                        </label>
+                        <span id="chat-intent-hint">Ответ без изменения файлов</span>
+                    </div>
                     <form id="prompt-form" class="composer" hidden>
                         <textarea
                             id="prompt"

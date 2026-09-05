@@ -10,6 +10,7 @@ function storedTheme() {
 export { THEMES };
 
 export const state = {
+  surface: loadString("ronix-agent-surface", "projects") || "projects",
   projects: [],
   projectRoots: [],
   models: [],
@@ -29,6 +30,13 @@ export const state = {
   liveResponse: null,
   liveRenderFrame: null,
   selectedSession: null,
+  archivedMessages: [],
+  chats: [],
+  chatIntent: "ask",
+  chatActionProjectId: null,
+  memoryItems: [],
+  memoryTotal: 0,
+  memoryLoading: false,
   theme: storedTheme(),
   settingsTab: "projects",
   showTechnical: loadString("ronix-agent-technical") === "true",

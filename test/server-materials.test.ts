@@ -94,7 +94,7 @@ test("runs the material generation, attempt, revision, and delete API lifecycle"
     const turn = codex.calls.findLast((call) => call.method === "turn/start");
     const prompt = (turn?.params as { input?: Array<{ text: string }> })?.input?.[0]?.text ?? "";
     assert.match(prompt, new RegExp(`learning/theory/materials/${generation.materialId}\\.json`));
-    assert.match(prompt, /LEARNING_DIARY\.md/);
+    assert.match(prompt, /ronix_learning_get_state/);
     assert.match(prompt, /Тема задана пользователем: «Замыкания»/);
     assert.match(prompt, /ровно 6 блоков/);
     assert.match(prompt, /блоки explanation \(2 шт\.\)/);

@@ -6,6 +6,7 @@ import { isLearningProject } from "../features/context.js";
 import {
   bindTheoryMaterialsView,
   loadLearning,
+  migrateLegacyLearning,
   renderLearningDashboard,
   renderTheoryMaterialsView,
 } from "../features/learning.js";
@@ -280,6 +281,9 @@ export function renderEvents(scrollToBottom = true) {
       const { renderLearningProgressMode } = await import("../features/learning.js");
       renderLearningProgressMode();
     });
+    container.querySelector("[data-migrate-learning]")?.addEventListener("click", () => {
+      void migrateLegacyLearning();
+    });
     container.querySelectorAll("[data-progress-tab]").forEach((button) => {
       button.addEventListener("click", () => {
         state.progressTab = button.dataset.progressTab;
@@ -296,29 +300,49 @@ export function renderEvents(scrollToBottom = true) {
     if (approvalsHost) renderPendingApprovals(approvalsHost);
     return;
   }
+  if (state.surface === "chat" && state.archivedMessages.length) {
+    for (const message of state.archivedMessages) {
+      appendEvent(message.role === "user"
+        ? { type: "user.message", payload: { text: message.text } }
+        : {
+            type: "codex.item.completed",
+            payload: { item: { type: "agentMessage", phase: "final_answer", text: message.text } },
+          }, container);
+    }
+  }
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
   const hasApprovals = Object.keys(state.approvals).length > 0;
-  if (events.length === 0 && !hasApprovals) {
-    const hasProject = Boolean($("#project").value);
+  const hasArchivedMessages = state.surface === "chat" && state.archivedMessages.length > 0;
+  if (events.length === 0 && !hasApprovals && !hasArchivedMessages) {
+    const chatSurface = state.surface === "chat";
+    const hasProject = chatSurface || Boolean($("#project").value);
     const hasSessions = state.sessions.length > 0;
     const learning = isLearningProject();
     const emptyTitle = state.sessionId
-      ? learning && state.learningMode === "practice"
+      ? chatSurface
+        ? "Начните общий диалог"
+        : learning && state.learningMode === "practice"
         ? "Начните практику"
         : learning && state.learningMode === "theory"
           ? "Закройте пробел в теории"
           : "Начните диалог"
+      : chatSurface
+        ? "Создайте первый чат"
       : !hasProject
         ? "Добавьте проект"
         : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
-      ? learning && state.learningMode === "practice"
+      ? chatSurface
+        ? "Ask отвечает без изменений, Act работает в явно выбранном проекте."
+        : learning && state.learningMode === "practice"
         ? "Отправьте код или вопрос по заданию в поле ниже."
         : learning && state.learningMode === "theory"
           ? "Выберите предложенную тему или задайте свой вопрос. Код писать не потребуется."
           : learning
             ? "Продолжите курс в поле ниже."
           : "Опишите задачу в поле ниже."
+      : chatSurface
+        ? "Чаты объединяют контекст проектов, учёбы и общей памяти."
       : !hasProject
         ? "Укажите каталог проекта в боковой панели."
         : learning
@@ -332,13 +356,18 @@ export function renderEvents(scrollToBottom = true) {
         <h3>${emptyTitle}</h3>
         <p>${emptyDescription}</p>
         ${hasProject && !hasSessions && !learning
-          ? '<button class="empty-action" type="button" data-create-session>Создать сессию</button>'
+          ? `<button class="empty-action" type="button" data-create-session>${chatSurface ? "Создать чат" : "Создать сессию"}</button>`
           : ""}
       </div>
     `;
     container.querySelector("[data-create-session]")?.addEventListener("click", async () => {
-      const { createSession } = await import("../features/sessions.js");
-      void createSession();
+      if (chatSurface) {
+        const { createChat } = await import("../features/chats.js");
+        void createChat();
+      } else {
+        const { createSession } = await import("../features/sessions.js");
+        void createSession();
+      }
     });
     return;
   }

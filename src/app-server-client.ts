@@ -1,5 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createInterface, type Interface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 type RpcId = number | string;
 
@@ -51,7 +53,10 @@ export class AppServerClient implements CodexAppServer {
   private readonly serverRequestListeners = new Set<ServerRequestListener>();
   private readonly exitListeners = new Set<ExitListener>();
 
-  constructor(private readonly codexPath: string | null) {}
+  constructor(
+    private readonly codexPath: string | null,
+    private readonly memoryMcp?: { dataDir: string },
+  ) {}
 
   async request<T>(method: string, params: unknown = {}, timeoutMs = 30_000): Promise<T> {
     await this.ensureConnected();
@@ -110,7 +115,7 @@ export class AppServerClient implements CodexAppServer {
   }
 
   private async connect(): Promise<void> {
-    const child = spawn(this.codexPath ?? "codex", ["app-server", "--listen", "stdio://"], {
+    const child = spawn(this.codexPath ?? "codex", this.appServerArguments(), {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
@@ -139,6 +144,28 @@ export class AppServerClient implements CodexAppServer {
       },
     }, 15_000);
     this.write({ method: "initialized", params: {} });
+  }
+
+  private appServerArguments(): string[] {
+    const args = ["app-server", "--listen", "stdio://"];
+    if (!this.memoryMcp) return args;
+    const sourceEntry = fileURLToPath(new URL("./memory-mcp.ts", import.meta.url));
+    const builtEntry = fileURLToPath(new URL("./memory-mcp.js", import.meta.url));
+    const runningFromSource = existsSync(sourceEntry);
+    const commandArgs = runningFromSource
+      ? ["--import", "tsx", sourceEntry, "--data-dir", this.memoryMcp.dataDir]
+      : [builtEntry, "--data-dir", this.memoryMcp.dataDir];
+    args.push(
+      "-c",
+      `mcp_servers.ronix_memory.command=${tomlString(process.execPath)}`,
+      "-c",
+      `mcp_servers.ronix_memory.args=${JSON.stringify(commandArgs)}`,
+      "-c",
+      "mcp_servers.ronix_memory.enabled=true",
+      "-c",
+      "mcp_servers.ronix_memory.startup_timeout_sec=15",
+    );
+    return args;
   }
 
   private sendRequest<T>(method: string, params: unknown, timeoutMs: number): Promise<T> {
@@ -226,4 +253,8 @@ export class AppServerClient implements CodexAppServer {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
 }

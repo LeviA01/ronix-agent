@@ -14,6 +14,7 @@ export function setConnection(text) {
 }
 
 export function selectedProject() {
+  if (state.surface !== "projects") return null;
   return state.projects.find((project) => project.id === $("#project")?.value) ?? null;
 }
 
