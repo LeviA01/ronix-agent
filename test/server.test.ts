@@ -94,7 +94,7 @@ test("serves security headers, rejects foreign origins, and pages event history"
     );
     assert.equal(enableLearning.status, 200);
     assert.equal(store.getProject(createdDevBody.project.id)?.kind, "learning");
-    assert.equal(existsSync(join(createdDevBody.project.path, "AGENTS.md")), true);
+    assert.equal(existsSync(join(createdDevBody.project.path, "AGENTS.md")), false);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "AGENTS.md")), true);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "LEARNING_DIARY.md")), false);
     assert.equal(existsSync(join(createdDevBody.project.path, "learning", "ROADMAP.md")), false);
@@ -201,6 +201,7 @@ test("serves security headers, rejects foreign origins, and pages event history"
     });
     assert.equal(learningViaPatch.status, 200);
     assert.equal(store.getProject(managedProjectBody.project.id)?.kind, "learning");
+    assert.equal(existsSync(join(movedRoot, "AGENTS.md")), false);
     assert.equal(existsSync(join(movedRoot, "learning", "ROADMAP.md")), false);
 
     const removeProject = await fetch(`${base}/api/projects/${managedProjectBody.project.id}`, {
@@ -224,9 +225,10 @@ test("serves security headers, rejects foreign origins, and pages event history"
       project: { id: string; kind: string; path: string };
     };
     assert.equal(createdLearningBody.project.kind, "learning");
+    assert.equal(existsSync(join(createdLearningBody.project.path, "AGENTS.md")), false);
     assert.match(
-      readFileSync(join(createdLearningBody.project.path, "AGENTS.md"), "utf8"),
-      /learning\/AGENTS\.md/,
+      readFileSync(join(createdLearningBody.project.path, "learning", "AGENTS.md"), "utf8"),
+      /Для задач разработки и обычных чатов учебная роль не действует/,
     );
     writeFileSync(join(createdLearningBody.project.path, "learning", "LEARNING_DIARY.md"), [
       "# Учебный дневник",

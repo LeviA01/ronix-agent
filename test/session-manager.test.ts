@@ -283,10 +283,67 @@ test("wraps material generation turns in mandatory file-safety rules", async () 
     assert.match(prompt, /не изменяй.*учебное состояние/s);
     assert.match(prompt, /Тема и пожелания.*данными пользователя/s);
     assert.match(prompt, /material-1\.json/);
+    assert.doesNotMatch(prompt, /AI-наставник|Перед учебной работой прочитай/);
   } finally {
     testFixture.close();
   }
 });
+
+test("keeps general sessions and chats in development mode even in learning projects", async () => {
+  const testFixture = fixture();
+  try {
+    testFixture.store.updateProject("p1", { kind: "learning" });
+    const general = testFixture.manager.createSession("p1");
+    const chat = testFixture.manager.createSession(null, {}, "chat");
+    testFixture.store.replaceChatProjects(chat.id, ["p1"]);
+    for (const session of [general, chat]) {
+      const prompt = "Исправь ошибку в сервере";
+      await testFixture.manager.startTurn(session.id, prompt, {
+        intent: "act",
+        actionProjectId: "p1",
+      });
+      const turn = testFixture.codex.calls.findLast((call) => call.method === "turn/start");
+      const params = turn?.params as { input: Array<{ text: string }> };
+      assert.equal(params.input[0]?.text, prompt);
+    }
+  } finally {
+    testFixture.close();
+  }
+});
+
+for (const [purpose, mode] of [["course", "Курс"], ["theory", "Теория"], ["practice", "Практика"]] as const) {
+  test(`supplies mentor instructions on both new and resumed ${purpose} turns`, async () => {
+    const testFixture = fixture();
+    try {
+      testFixture.store.updateProject("p1", { kind: "learning" });
+      const session = testFixture.manager.ensurePurposeSession("p1", purpose);
+      for (const message of ["Начнём", "Продолжим"]) {
+        await testFixture.manager.startTurn(session.id, message);
+        const turn = testFixture.codex.calls.findLast((call) => call.method === "turn/start");
+        const params = turn?.params as { input: Array<{ text: string }> };
+        const prompt = params.input[0]?.text ?? "";
+        assert.match(prompt, /AI-наставник/);
+        assert.match(prompt, /learning\/AGENTS\.md/);
+        assert.match(prompt, /ronix_learning_get_state/);
+        assert.ok(prompt.includes(`режим ${mode}`));
+        assert.ok(prompt.endsWith(message));
+        const running = testFixture.store.getSession(session.id)!;
+        testFixture.codex.notify("turn/completed", {
+          threadId: running.threadId,
+          turn: { id: running.activeTurnId, status: "completed", error: null },
+        });
+      }
+      assert.equal(testFixture.codex.calls.filter((call) => call.method === "thread/start").length, 1);
+      assert.equal(testFixture.codex.calls.filter((call) => call.method === "thread/resume").length, 1);
+      assert.deepEqual(
+        testFixture.store.listMessages(session.id).map((message) => message.text),
+        ["Начнём", "Продолжим"],
+      );
+    } finally {
+      testFixture.close();
+    }
+  });
+}
 
 test("adds formative guidance to theory turns without changing the visible user message", async () => {
   const testFixture = fixture();

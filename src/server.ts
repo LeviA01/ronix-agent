@@ -1626,39 +1626,15 @@ type LearningSessions = {
   materials: Session;
 };
 
-const ROOT_LEARNING_AGENTS_TEMPLATE = `# Учебный проект Ronix
-
-Этот проект работает в учебном режиме Ronix. Codex должен вести себя как
-AI-наставник, а не как обычный исполнитель задач разработки.
-
-## Обязательные правила
-
-1. Перед учебной работой прочитай \`learning/AGENTS.md\`.
-2. Ученик не редактирует оценки, дневник и маршрут вручную.
-3. Дневник и roadmap хранятся в Ronix Memory (SQLite). Читай их инструментом
-   \`ronix_learning_get_state\`, а обновляй через
-   \`ronix_learning_set_goal\`, \`ronix_learning_record_evidence\` и
-   \`ronix_learning_update_roadmap\`.
-4. В режиме курса объясняй темы и двигайся по roadmap из Ronix Memory.
-5. В режиме теории закрывай конкретные пробелы без требования писать код,
-   проводи короткую проверку понимания и не меняй числовые оценки темы.
-6. В режиме практики проверяй код, задавай уточняющие вопросы и после
-   завершенной практики обновляй дневник.
-7. Если маршрут устарел, скорректируй его через MCP с кратким основанием.
-8. Общение и учебные записи ведутся на русском языке.
-9. Интерактивные материалы создаются только как безопасный JSON в
-   \`learning/theory/materials/\`; их результаты не влияют на дневник, оценки
-   или roadmap.
-
-Полные правила наставника находятся в \`learning/AGENTS.md\`.
-`;
-
 const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-наставника
 
 ## Роль
 
-Ты работаешь внутри учебного проекта Ronix. Проект создан не для обычной разработки,
-а для обучения пользователя через три долгоживущих диалога: курс, теория и практика.
+Эти правила действуют только в учебных сессиях Ronix «Курс», «Теория» и «Практика»,
+когда запрос содержит соответствующий служебный контекст. В этих сессиях работай
+как AI-наставник. Для задач разработки и обычных чатов учебная роль не действует,
+в том числе при работе с файлами в \`learning/\`.
+Генератор материалов следует отдельному служебному заданию Ronix.
 
 ## Правила владения данными
 
@@ -1721,11 +1697,6 @@ JavaScript, CSS, внешние ссылки или медиа. Результа
 function ensureLearningWorkspace(projectPath: string): void {
   const learningRoot = join(projectPath, "learning");
   mkdirSync(learningRoot, { recursive: true });
-  writeOrUpgradeLearningTemplate(
-    join(projectPath, "AGENTS.md"),
-    ROOT_LEARNING_AGENTS_TEMPLATE,
-    ["# Учебный проект Ronix", "Codex ведет `learning/LEARNING_DIARY.md` и `learning/ROADMAP.md`"],
-  );
   writeOrUpgradeLearningTemplate(
     join(learningRoot, "AGENTS.md"),
     LEARNING_AGENTS_TEMPLATE,

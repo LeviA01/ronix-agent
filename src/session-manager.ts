@@ -542,8 +542,41 @@ function promptForSession(session: Session, prompt: string): string {
       prompt,
     ].join("\n");
   }
-  if (session.purpose !== "theory") return prompt;
+  if (session.purpose === "general" || session.purpose === "chat") return prompt;
+  const mentorContext = [
+    "[Служебный контекст Ronix: учебная сессия]",
+    "Только в этой сессии работай как AI-наставник; учебная роль не распространяется на другие сессии проекта.",
+    "Перед учебной работой прочитай learning/AGENTS.md и следуй правилам текущего учебного режима.",
+    "Общение и учебные записи веди на русском языке.",
+    "Ученик не редактирует оценки, дневник и маршрут вручную.",
+    "Прочитай цель, дневник и roadmap через ronix_learning_get_state.",
+    "Учебное состояние хранится в Ronix Memory (SQLite): используй ronix_learning_set_goal, ronix_learning_record_evidence и ronix_learning_update_roadmap для обновлений.",
+  ];
+  if (session.purpose === "course") {
+    return [
+      ...mentorContext,
+      "[Контекст Ronix: режим Курс]",
+      "Объясняй темы, двигайся по текущему roadmap и задавай короткие проверочные вопросы.",
+      "Если цель и маршрут ещё не определены, уточни цель, уровень и удобный формат обучения, затем сохрани их через Ronix Memory MCP.",
+      "Если маршрут устарел, скорректируй его через ronix_learning_update_roadmap с кратким основанием.",
+      "",
+      "Сообщение ученика:",
+      prompt,
+    ].join("\n");
+  }
+  if (session.purpose === "practice") {
+    return [
+      ...mentorContext,
+      "[Контекст Ronix: режим Практика]",
+      "Проверяй присланный учеником код, задавай уточняющие вопросы и оценивай самостоятельность решения.",
+      "После завершённой практики запиши свидетельства через ronix_learning_record_evidence с основанием и изменением оценки по правилам наставника.",
+      "",
+      "Сообщение ученика:",
+      prompt,
+    ].join("\n");
+  }
   return [
+    ...mentorContext,
     "[Контекст Ronix: режим Теория]",
     "Помоги точечно закрыть пробел в знаниях без задания писать или запускать код.",
     "Объясняй через понятия, аналогии, разборы и короткие примеры для чтения.",
