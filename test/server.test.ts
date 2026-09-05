@@ -18,6 +18,8 @@ test("serves security headers, rejects foreign origins, and pages event history"
   const sessions = new SessionManager(store, codex, 100);
   const config = {
     ...defaultConfig,
+    deploymentMode: "local" as const,
+    accessMode: "local" as const,
     dataDir: join(directory, "data"),
     projectRoots: [projectRoot],
     authKey: "",
