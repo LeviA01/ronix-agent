@@ -1,0 +1,18 @@
+body[data-allow-chat="false"] [data-surface="chat"],
+body[data-allow-development="false"] [data-surface="memory"],
+body[data-allow-development="false"][data-allow-learning="false"] [data-surface="projects"],
+body[data-allow-development="false"] #toggle-git,
+body[data-allow-development="false"] #new-session,
+body[data-allow-development="false"] [data-chat-intent="act"],
+body[data-allow-learning="false"] .project-kind-option,
+body[data-admin="false"] #show-limits { display:none !important; }
+body[data-allow-learning="false"] [data-project-learning] { display: none !important; }
+
+.access-nav-button { display:flex; align-items:center; gap:10px; width:100%; min-height:48px; flex-shrink:0; padding:12px; margin:0 0 8px; border-radius:10px; color:var(--text-soft); background:transparent; font-size:13px; font-weight:500; line-height:1.4; text-decoration:none; transition:background 160ms ease, color 160ms ease; }
+.access-nav-button[hidden] { display:none; }
+.access-nav-button svg { width:18px; height:18px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.access-nav-button .access-nav-chevron { width:14px; height:14px; margin-left:auto; color:var(--muted-strong); }
+.access-nav-button:hover { background:var(--surface-hover); color:var(--text); }
+.access-nav-button:active { background:var(--surface-raised); }
+.access-nav-button:focus-visible { outline:2px solid var(--accent-strong); outline-offset:2px; }
+@media(prefers-reduced-motion:reduce) { .access-nav-button { transition:none; } }

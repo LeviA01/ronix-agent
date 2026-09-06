@@ -1,4 +1,5 @@
 import { state } from "../core/state.js";
+import { applyAccess } from "../core/access.js";
 import { $, $$ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml } from "../core/format.js";
@@ -46,6 +47,7 @@ async function addProject(folder, create = false, kind = "dev") {
     body: JSON.stringify({ path: folder, create, kind }),
   });
   $("#project-form").reset();
+  applyAccess();
   saveCurrentDraft();
   state.projects = [
     ...state.projects.filter((item) => item.id !== project.id),

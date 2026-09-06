@@ -106,7 +106,7 @@ test("serves security headers, rejects foreign origins, and pages event history"
     );
     assert.match(
       readFileSync(join(createdDevBody.project.path, "learning", "AGENTS.md"), "utf8"),
-      /ronix_learning_record_evidence/,
+      /learning\/LEARNING_DIARY\.md/,
     );
     const customRoadmap = "# Custom roadmap\n";
     const customRootAgents = "# Custom root agents\n";
@@ -306,42 +306,16 @@ test("serves security headers, rejects foreign origins, and pages event history"
       };
     };
     assert.equal(learningStateBody.available, true);
-    assert.equal(learningStateBody.source, "database");
-    assert.equal(learningStateBody.diarySummary.topicCount, 0);
-    assert.equal(learningStateBody.legacyMigration.available, true);
-    assert.deepEqual(learningStateBody.legacyMigration.preview, {
-      goal: "",
-      topics: 2,
-      assignments: 2,
-      roadmapItems: 4,
+    assert.equal(learningStateBody.source, "files");
+    assert.equal(learningStateBody.diarySummary.topicCount, 2);
+    const before = readFileSync(join(createdLearningBody.project.path, "learning", "ROADMAP.md"), "utf8");
+    const rejectedImport = await fetch(`${base}/api/projects/${createdLearningBody.project.id}/learning/migrate`, {
+      method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ confirmed: true }),
     });
-    const migrateLearning = await fetch(
-      `${base}/api/projects/${createdLearningBody.project.id}/learning/migrate`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: base },
-        body: JSON.stringify({ confirmed: true }),
-      },
-    );
-    assert.equal(migrateLearning.status, 200);
-    const migrated = await migrateLearning.json() as {
-      migration: { archivePath: string };
-      learning: typeof learningStateBody;
-    };
-    assert.equal(existsSync(join(createdLearningBody.project.path, "learning", "LEARNING_DIARY.md")), false);
-    assert.equal(existsSync(join(createdLearningBody.project.path, migrated.migration.archivePath, "LEARNING_DIARY.md")), true);
-    assert.deepEqual(migrated.learning.diarySummary.focus, ["Пройти исключения"]);
-    assert.equal(migrated.learning.diarySummary.weakTopics[0]?.title, "Исключения");
-    assert.equal(migrated.learning.diarySummary.strongTopics[0]?.title, "Функции");
-    assert.deepEqual(migrated.learning.diarySummary.latestGrades, [
-      { title: "Задание 1", score: 6 },
-      { title: "Задание 2", score: 8 },
-    ]);
-    assert.equal(migrated.learning.roadmapSummary.currentStage, "Пройти исключения");
-    assert.deepEqual(migrated.learning.roadmapSummary.nextSteps, [
-      { title: "Практика с файлами", done: false },
-    ]);
-    assert.deepEqual(migrated.learning.roadmapSummary.completed, ["Настроить цель"]);
+    assert.equal(rejectedImport.status, 410);
+    assert.equal(readFileSync(join(createdLearningBody.project.path, "learning", "ROADMAP.md"), "utf8"), before);
+    assert.equal(learningStateBody.roadmapSummary.currentStage, "Пройти исключения");
+    assert.deepEqual(learningStateBody.roadmapSummary.completed, ["Настроить цель"]);
     assert.equal(learningStateBody.sessions.course.purpose, "course");
     assert.equal(learningStateBody.sessions.theory.purpose, "theory");
     assert.equal(learningStateBody.sessions.practice.purpose, "practice");
@@ -355,9 +329,9 @@ test("serves security headers, rejects foreign origins, and pages event history"
         practice: { id: string };
       };
     };
-    assert.equal(repeatedLearningBody.sessions.course.id, migrated.learning.sessions.course.id);
-    assert.equal(repeatedLearningBody.sessions.theory.id, migrated.learning.sessions.theory.id);
-    assert.equal(repeatedLearningBody.sessions.practice.id, migrated.learning.sessions.practice.id);
+    assert.equal(repeatedLearningBody.sessions.course.id, learningStateBody.sessions.course.id);
+    assert.equal(repeatedLearningBody.sessions.theory.id, learningStateBody.sessions.theory.id);
+    assert.equal(repeatedLearningBody.sessions.practice.id, learningStateBody.sessions.practice.id);
 
     const now = new Date().toISOString();
     store.createProject({ id: "p1", name: "Test", path: projectRoot, kind: "dev", createdAt: now });
@@ -416,13 +390,10 @@ test("serves security headers, rejects foreign origins, and pages event history"
       };
     };
     assert.equal(learningBody.available, false);
-    assert.equal(learningBody.source, "database");
+    assert.equal(learningBody.source, "files");
     assert.equal(learningBody.summary.topicCount, 0);
     assert.equal(learningBody.summary.assignmentCount, 0);
-    assert.equal(learningBody.legacyMigration.available, true);
-    assert.equal(learningBody.legacyMigration.diaryPath, "examples/LEARNING_DIARY.md");
-    assert.equal(learningBody.legacyMigration.preview.topics, 1);
-    assert.equal(learningBody.legacyMigration.preview.assignments, 1);
+    assert.equal(learningBody.legacyMigration, undefined);
 
     const models = await fetch(base + "/api/codex/models");
     assert.equal(models.status, 200);

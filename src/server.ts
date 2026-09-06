@@ -1,11 +1,10 @@
+import { readLearningFile, roadmapSummary as summarizeFileRoadmap } from "./learning-files.js";
 import { randomUUID } from "node:crypto";
 import {
   createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import {
@@ -18,6 +17,7 @@ import { extname, join, normalize } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AppServerClient } from "./app-server-client.js";
 import { AuthManager } from "./auth.js";
+import { requireModule, type UserAccess, type UserModule } from "./access.js";
 import { config as defaultConfig } from "./config.js";
 import { HttpError, json, readJson, requireString } from "./http.js";
 import { GitActionError, isGitAction, readGitStatus, runGitAction } from "./git-status.js";
@@ -66,12 +66,13 @@ type Application = {
   shutdown(): Promise<void>;
 };
 
-type ApplicationOptions = {
+export type ApplicationOptions = {
   config?: Config;
   store?: Store;
   sessions?: SessionManager;
   auth?: AuthManager;
   publicDir?: string;
+  access?: UserAccess;
 };
 
 const SANDBOX_MODES = new Set<SandboxMode>([
@@ -107,6 +108,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
   let modelCache: { value: CodexModel[]; expiresAt: number } | null = null;
   let modelPending: Promise<CodexModel[]> | null = null;
   const generatingMaterials = new Set<string>();
+  const allowed = (module: UserModule) => !options.access || options.access.modules.includes(module);
+  const projectModule = (kind: string): UserModule => kind === "learning" ? "learning" : "development";
+  const sessionModule = (purpose: SessionPurpose): UserModule => purpose === "chat" ? "chat"
+    : purpose === "general" ? "development" : "learning";
 
   async function getUsage(force: boolean): Promise<unknown> {
     if (!force && usageCache && usageCache.expiresAt > Date.now()) return usageCache.value;
@@ -283,6 +288,18 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
 
     const parts = pathParts(url);
+    if (parts[1] === "chats") requireModule(options.access, "chat");
+    if (parts[1] === "memory") requireModule(options.access, "development");
+    if (parts[1] === "projects" && parts[2]) {
+      const project = store.getProject(parts[2]);
+      if (project) requireModule(options.access, projectModule(project.kind));
+      if (parts[3] === "learning") requireModule(options.access, "learning");
+      if (parts[3] === "git") requireModule(options.access, "development");
+    }
+    if (parts[1] === "sessions" && parts[2]) {
+      const session = store.getSession(parts[2]);
+      if (session) requireModule(options.access, sessionModule(session.purpose));
+    }
 
     if (request.method === "GET" && url.pathname === "/api/health") {
       json(response, shuttingDown ? 503 : 200, {
@@ -311,7 +328,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
 
     if (request.method === "GET" && url.pathname === "/api/projects") {
-      json(response, 200, { projects: store.listProjects(), projectRoots: config.projectRoots });
+      json(response, 200, {
+        projects: store.listProjects().filter(project => allowed(projectModule(project.kind))),
+        projectRoots: allowed("development") || allowed("learning") ? config.projectRoots : [],
+      });
       return true;
     }
 
@@ -333,6 +353,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
         reasoningEffort?: unknown;
       }>(request);
       const projectIds = projectIdList(body.projectIds, store);
+      for (const id of projectIds) requireModule(options.access, projectModule(store.getProject(id)!.kind));
       const requestedModel = optionalString(body.model, "model");
       const requestedEffort = optionalString(body.reasoningEffort, "reasoningEffort");
       const modelSettings = requestedModel || requestedEffort
@@ -360,7 +381,9 @@ export function createApplication(options: ApplicationOptions = {}): Application
       }
       const projectIds = body.projectIds === undefined
         ? store.listChatProjectIds(chat.id)
-        : store.replaceChatProjects(chat.id, projectIdList(body.projectIds, store));
+        : projectIdList(body.projectIds, store);
+      for (const id of projectIds) requireModule(options.access, projectModule(store.getProject(id)!.kind));
+      if (body.projectIds !== undefined) store.replaceChatProjects(chat.id, projectIds);
       json(response, 200, { chat: { ...updated, projectIds } });
       return true;
     }
@@ -477,6 +500,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       }>(request);
       const requestedPath = requireString(body.path, "path");
       const kind = projectKind(body.kind);
+      requireModule(options.access, projectModule(kind));
       const resolution = await resolveProjectPath(requestedPath, config.projectRoots);
       if (!resolution.exists && body.create !== true) {
         json(response, 409, {
@@ -550,7 +574,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
         }
         update.path = resolution.path;
       }
-      if (body.kind !== undefined) update.kind = projectKind(body.kind);
+      if (body.kind !== undefined) {
+        update.kind = projectKind(body.kind);
+        requireModule(options.access, projectModule(update.kind));
+      }
       if (Object.keys(update).length === 0) {
         throw new HttpError(400, "No project fields were provided");
       }
@@ -603,7 +630,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
         : store.updateProjectKind(project.id, "learning");
       json(response, 200, {
         project: updated,
-        learning: readLearningWorkspace(updated, store, ensureLearningSessions(updated.id)),
+        learning: readLearningWorkspace(updated, ensureLearningSessions(updated.id)),
       });
       return true;
     }
@@ -619,16 +646,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       const project = store.getProject(parts[2]);
       if (!project) throw new HttpError(404, "Project not found");
       if (project.kind !== "learning") throw new HttpError(409, "Project is not in learning mode");
-      const body = await readJson<{ confirmed?: unknown }>(request);
-      if (body.confirmed !== true) {
-        throw new HttpError(400, "Legacy learning import requires explicit confirmation");
-      }
-      const migration = importLegacyLearning(project, store);
-      json(response, 200, {
-        migration,
-        learning: readLearningWorkspace(project, store, ensureLearningSessions(project.id)),
-      });
-      return true;
+      throw new HttpError(410, "Дневник и Roadmap хранятся в файлах learning; импорт в базу отключён");
     }
 
     if (
@@ -824,17 +842,18 @@ export function createApplication(options: ApplicationOptions = {}): Application
       const purposeSessions = project.kind === "learning"
         ? ensureLearningSessions(project.id)
         : undefined;
-      json(response, 200, readLearningWorkspace(project, store, purposeSessions));
+      json(response, 200, readLearningWorkspace(project, purposeSessions));
       return true;
     }
 
     if (request.method === "GET" && url.pathname === "/api/sessions") {
       const projectId = url.searchParams.get("projectId") ?? undefined;
-      json(response, 200, { sessions: store.listSessions(projectId) });
+      json(response, 200, { sessions: store.listSessions(projectId).filter(session => allowed(sessionModule(session.purpose))) });
       return true;
     }
 
     if (request.method === "POST" && url.pathname === "/api/sessions") {
+      requireModule(options.access, "development");
       const body = await readJson<{
         projectId?: unknown;
         model?: unknown;
@@ -962,6 +981,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
         const actionProjectId = body.actionProjectId === undefined
           ? null
           : requireString(body.actionProjectId, "actionProjectId");
+        if (intent === "act") requireModule(options.access, "development");
         try {
           await sessions.startTurn(sessionId, requireString(body.prompt, "prompt"), {
             ...(intent ? { intent } : {}),
@@ -1638,11 +1658,11 @@ const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-настав�
 
 ## Правила владения данными
 
-1. Ученик не редактирует оценки, дневник и маршрут вручную.
-2. Codex ведет дневник и roadmap инструментами Ronix Memory MCP:
-   \`ronix_learning_get_state\`, \`ronix_learning_set_goal\`,
-   \`ronix_learning_record_evidence\` и \`ronix_learning_update_roadmap\`.
-3. UI Ronix показывает состояние из SQLite только для чтения.
+1. Дневник и маршрут хранятся в файлах проекта; сохраняй пользовательские правки.
+2. Codex читает и обновляет файлы learning/LEARNING_DIARY.md и learning/ROADMAP.md.
+   Сохраняй все разделы, многострочные пункты и историю. Создавай отсутствующий
+   документ только после чтения инструкций проекта и согласования цели обучения.
+3. UI Ronix читает эти файлы; отдельного учебного состояния в SQLite нет.
 4. Учебные записи ведутся на русском языке.
 
 ## Первый учебный диалог
@@ -1655,13 +1675,13 @@ const LEARNING_AGENTS_TEMPLATE = `# Инструкция для AI-настав�
 - ограничения по времени и темпу;
 - какие прежние материалы или дневник нужно импортировать.
 
-После этого сохрани цель, начальные наблюдения и roadmap через Ronix Memory MCP.
+После этого сохрани цель, начальные наблюдения и roadmap в файлах learning/LEARNING_DIARY.md и learning/ROADMAP.md.
 
 ## Курс
 
 В режиме курса объясняй темы, выбирай следующий блок по текущему roadmap, задавай
 короткие проверочные вопросы и корректируй маршрут, если он устарел. Если меняешь
-roadmap, передавай краткое основание инструменту обновления.
+roadmap, сохраняй краткое основание в истории корректировок.
 
 ## Теория
 
@@ -1670,7 +1690,7 @@ roadmap, передавай краткое основание инструмен
 чтения. После объяснения задай по одному 2-4 коротких вопроса на воспроизведение.
 
 Теоретические ошибки не снижают основную числовую оценку темы. После проверки
-запиши теоретическое наблюдение через \`ronix_learning_record_evidence\`:
+запиши теоретическое наблюдение в learning/LEARNING_DIARY.md:
 тему, статус \`разобрано\` или \`нужно повторить\` и краткое основание.
 Меняй roadmap только если найденный пробел действительно влияет на маршрут.
 
@@ -1683,8 +1703,8 @@ JavaScript, CSS, внешние ссылки или медиа. Результа
 
 В режиме практики пользователь сдает код обычным сообщением. Проверяй решение,
 задавай уточняющие вопросы, оценивай самостоятельность и после завершенной
-практики запиши свидетельства по затронутым темам через
-\`ronix_learning_record_evidence\`, включая основание и изменение оценки.
+практики запиши свидетельства по затронутым темам
+в learning/LEARNING_DIARY.md, включая основание и изменение оценки.
 
 ## Оценивание
 
@@ -1697,199 +1717,33 @@ JavaScript, CSS, внешние ссылки или медиа. Результа
 function ensureLearningWorkspace(projectPath: string): void {
   const learningRoot = join(projectPath, "learning");
   mkdirSync(learningRoot, { recursive: true });
-  writeOrUpgradeLearningTemplate(
+  writeMissingLearningTemplate(
     join(learningRoot, "AGENTS.md"),
     LEARNING_AGENTS_TEMPLATE,
-    ["# Инструкция для AI-наставника", "Codex ведет `learning/LEARNING_DIARY.md` и `learning/ROADMAP.md`"],
   );
   ensureTheoryMaterialsDirectory(projectPath);
 }
 
-function writeOrUpgradeLearningTemplate(path: string, content: string, legacyMarkers: string[]): void {
+function writeMissingLearningTemplate(path: string, content: string): void {
   if (!existsSync(path)) {
     writeFileSync(path, content, "utf8");
     return;
   }
-  const current = readUtf8File(path);
-  if (legacyMarkers.every((marker) => current.includes(marker))) {
-    writeFileSync(path, content, "utf8");
-  }
+  // Existing project instructions belong to the user and are not upgraded implicitly.
 }
 
 function readLearningWorkspace(
   project: Project,
-  store: Store,
   purposeSessions?: LearningSessions,
-): {
-  kind: ProjectKind;
-  available: boolean;
-  source: "database";
-  agentsPath: string | null;
-  diary: string;
-  roadmap: string;
-  summary: ReturnType<typeof learningDiarySummary>;
-  diarySummary: ReturnType<typeof learningDiarySummary>;
-  roadmapSummary: ReturnType<typeof learningRoadmapSummary>;
-  sessions: LearningSessions | null;
-  legacyMigration: ReturnType<typeof legacyLearningPreview>;
-} {
-  const state = {
-    goal: store.getLearningGoal(project.id),
-    topics: store.listLearningTopics(project.id),
-    observations: store.listLearningObservations(project.id, 200),
-    roadmap: store.listRoadmapItems(project.id),
-  };
-  const diarySummary = learningDiarySummary(state);
+) {
+  const diary = readLearningFile(project.path, "LEARNING_DIARY.md");
+  const roadmap = readLearningFile(project.path, "ROADMAP.md");
+  const diarySummary = { ...summarizeDiary(diary), goal: legacyLearningGoal(diary) };
   return {
-    kind: project.kind,
-    available: project.kind === "learning",
-    source: "database",
-    agentsPath: existsSync(join(project.path, "learning", "AGENTS.md"))
-      ? "learning/AGENTS.md"
-      : null,
-    diary: renderLearningDiary(state),
-    roadmap: renderLearningRoadmap(state.roadmap),
-    summary: diarySummary,
-    diarySummary,
-    roadmapSummary: learningRoadmapSummary(state.roadmap),
-    sessions: purposeSessions ?? null,
-    legacyMigration: legacyLearningPreview(project, store),
-  };
-}
-
-function learningDiarySummary(state: {
-  goal: string;
-  topics: StoredLearningTopic[];
-  observations: StoredLearningObservation[];
-  roadmap: StoredLearningRoadmapItem[];
-}) {
-  const topics = state.topics.map((topic) => ({
-    title: topic.title,
-    score: topic.score,
-    confidence: confidenceLabel(topic.confidence),
-    rationale: topic.lastEvidence,
-  }));
-  const assignments = state.observations
-    .filter((item) => item.kind === "practice" || item.kind === "control")
-    .map((item) => ({
-      title: item.topic,
-      score: item.resultScore ?? storeScoreAfterObservation(item, state.topics),
-    }));
-  const lastUpdated = [
-    ...state.topics.map((item) => item.updatedAt),
-    ...state.observations.map((item) => item.createdAt),
-  ].sort().at(-1) ?? null;
-  const averageScore = topics.length
-    ? Math.round((topics.reduce((sum, topic) => sum + topic.score, 0) / topics.length) * 10) / 10
-    : null;
-  const focus = state.roadmap
-    .filter((item) => item.lane === "now" && item.status === "todo")
-    .map((item) => item.title);
-  return {
-    goal: state.goal,
-    lastUpdated,
-    topicCount: topics.length,
-    assignmentCount: assignments.length,
-    focus,
-    latestGrades: assignments.slice(0, 6),
-    averageScore,
-    topics,
-    weakTopics: [...topics].sort((a, b) => a.score - b.score).slice(0, 6),
-    strongTopics: [...topics].sort((a, b) => b.score - a.score).slice(0, 6),
-    assignments,
-  };
-}
-
-function storeScoreAfterObservation(
-  observation: StoredLearningObservation,
-  topics: StoredLearningTopic[],
-): number | null {
-  return topics.find((topic) => topic.title.toLocaleLowerCase("ru") === observation.topic.toLocaleLowerCase("ru"))
-    ?.score ?? null;
-}
-
-function confidenceLabel(confidence: number): string {
-  if (confidence >= 0.8) return "высокая";
-  if (confidence >= 0.5) return "средняя";
-  return "низкая";
-}
-
-function learningRoadmapSummary(items: StoredLearningRoadmapItem[]) {
-  const lane = (name: StoredLearningRoadmapItem["lane"]) => items
-    .filter((item) => item.lane === name && item.status !== "dropped")
-    .map((item) => ({ title: item.title, done: item.status === "done" }));
-  const current = lane("now");
-  const nextSteps = lane("next");
-  const later = lane("later");
-  return {
-    currentStage: current.find((item) => !item.done)?.title
-      ?? nextSteps.find((item) => !item.done)?.title
-      ?? null,
-    current,
-    nextSteps,
-    later,
-    completed: items.filter((item) => item.status === "done").map((item) => item.title),
-  };
-}
-
-function renderLearningDiary(state: {
-  goal: string;
-  topics: StoredLearningTopic[];
-  observations: StoredLearningObservation[];
-}): string {
-  const topicRows = state.topics.length
-    ? state.topics.map((topic) =>
-        `| ${topic.title} | ${topic.score} | ${confidenceLabel(topic.confidence)} | ${topic.lastEvidence} |`
-      ).join("\n")
-    : "Пока нет оцененных тем.";
-  const observationRows = state.observations.length
-    ? state.observations.map((item) =>
-        `- ${item.createdAt.slice(0, 10)} · ${item.topic}: ${item.rationale}`
-      ).join("\n")
-    : "Пока нет наблюдений.";
-  return `# Учебный дневник\n\n## Цель обучения\n\n${state.goal || "Пока не уточнена."}\n\n## Текущая карта знаний\n\n| Тема | Балл | Уверенность | Последнее основание |\n|---|---:|---|---|\n${topicRows}\n\n## Наблюдения\n\n${observationRows}`;
-}
-
-function renderLearningRoadmap(items: StoredLearningRoadmapItem[]): string {
-  const section = (title: string, lane: StoredLearningRoadmapItem["lane"]) => {
-    const rows = items.filter((item) => item.lane === lane && item.status !== "dropped");
-    return `## ${title}\n\n${rows.length
-      ? rows.map((item) => `- [${item.status === "done" ? "x" : " "}] ${item.title}`).join("\n")
-      : "Пока пусто."}`;
-  };
-  return `# Дорожная карта\n\n${section("Сейчас", "now")}\n\n${section("Следующие шаги", "next")}\n\n${section("Позже", "later")}`;
-}
-
-function legacyLearningPreview(project: Project, store: Store): {
-  available: boolean;
-  imported: boolean;
-  diaryPath: string | null;
-  roadmapPath: string | null;
-  preview: { goal: string; topics: number; assignments: number; roadmapItems: number } | null;
-} {
-  const roots = [join(project.path, "learning"), join(project.path, "examples")];
-  const root = roots.find((candidate) => existsSync(join(candidate, "LEARNING_DIARY.md")));
-  const diaryPath = root ? join(root, "LEARNING_DIARY.md") : null;
-  const roadmapPath = root && existsSync(join(root, "ROADMAP.md")) ? join(root, "ROADMAP.md") : null;
-  const imported = store.hasLegacyLearningMigration(project.id);
-  if (!diaryPath || imported) {
-    return { available: false, imported, diaryPath: null, roadmapPath: null, preview: null };
-  }
-  const diary = readUtf8File(diaryPath);
-  const roadmap = roadmapPath ? readUtf8File(roadmapPath) : "";
-  const summary = summarizeDiary(diary);
-  const roadmapSummary = summarizeRoadmap(roadmap);
-  return {
-    available: true,
-    imported,
-    diaryPath: diaryPath.slice(project.path.length + 1),
-    roadmapPath: roadmapPath ? roadmapPath.slice(project.path.length + 1) : null,
-    preview: {
-      goal: legacyLearningGoal(diary),
-      topics: summary.topicCount,
-      assignments: summary.assignmentCount,
-      roadmapItems: roadmapSummary.current.length + roadmapSummary.nextSteps.length + roadmapSummary.later.length,
-    },
+    kind: project.kind, available: project.kind === "learning", source: "files",
+    agentsPath: existsSync(join(project.path, "learning", "AGENTS.md")) ? "learning/AGENTS.md" : null,
+    diary, roadmap, summary: diarySummary, diarySummary,
+    roadmapSummary: summarizeFileRoadmap(roadmap), sessions: purposeSessions ?? null,
   };
 }
 
@@ -1900,108 +1754,6 @@ function legacyLearningGoal(diary: string): string {
     .filter(Boolean)
     .join("\n")
     .replace(/^Пока не уточнена\.?$/i, "");
-}
-
-function importLegacyLearning(project: Project, store: Store): {
-  imported: true;
-  archivePath: string;
-  topics: number;
-  assignments: number;
-  roadmapItems: number;
-} {
-  if (store.hasLegacyLearningMigration(project.id)) {
-    throw new HttpError(409, "Legacy learning files were already imported");
-  }
-  const root = [join(project.path, "learning"), join(project.path, "examples")]
-    .find((candidate) => existsSync(join(candidate, "LEARNING_DIARY.md")));
-  if (!root) throw new HttpError(404, "Legacy learning diary was not found");
-  const diaryPath = join(root, "LEARNING_DIARY.md");
-  const roadmapPath = join(root, "ROADMAP.md");
-  const diary = readUtf8File(diaryPath);
-  const roadmap = existsSync(roadmapPath) ? readUtf8File(roadmapPath) : "";
-  const diarySummary = summarizeDiary(diary);
-  const roadmapSummary = summarizeRoadmap(roadmap);
-  const importedAt = new Date().toISOString();
-  const topics: StoredLearningTopic[] = diarySummary.topics.map((topic) => ({
-    projectId: project.id,
-    title: topic.title,
-    score: topic.score,
-    confidence: legacyConfidence(topic.confidence),
-    lastEvidence: topic.rationale || "Импортировано из Markdown-дневника",
-    updatedAt: importedAt,
-  }));
-  const observations: StoredLearningObservation[] = diarySummary.assignments.map((assignment) => ({
-    id: randomUUID(),
-    projectId: project.id,
-    topic: assignment.title,
-    kind: "practice",
-    scoreDelta: 0,
-    resultScore: assignment.score,
-    rationale: assignment.score == null
-      ? "Импортировано из Markdown-журнала заданий"
-      : `Импортированная оценка задания: ${assignment.score}/10`,
-    sourceSessionId: null,
-    createdAt: importedAt,
-  }));
-  const roadmapItems: StoredLearningRoadmapItem[] = [
-    ...legacyRoadmapLane(project.id, "now", roadmapSummary.current, importedAt),
-    ...legacyRoadmapLane(project.id, "next", roadmapSummary.nextSteps, importedAt),
-    ...legacyRoadmapLane(project.id, "later", roadmapSummary.later, importedAt),
-  ];
-  store.importLearningState({
-    projectId: project.id,
-    goal: legacyLearningGoal(diary),
-    topics,
-    observations,
-    roadmap: roadmapItems,
-  });
-
-  const archiveName = importedAt.replaceAll(":", "-").replaceAll(".", "-");
-  const archiveRoot = join(root, "archive", archiveName);
-  mkdirSync(archiveRoot, { recursive: true });
-  renameSync(diaryPath, join(archiveRoot, "LEARNING_DIARY.md"));
-  if (existsSync(roadmapPath)) renameSync(roadmapPath, join(archiveRoot, "ROADMAP.md"));
-  const archivePath = archiveRoot.slice(project.path.length + 1);
-  store.markLegacyLearningMigration(project.id, archivePath);
-  return {
-    imported: true,
-    archivePath,
-    topics: topics.length,
-    assignments: observations.length,
-    roadmapItems: roadmapItems.length,
-  };
-}
-
-function legacyConfidence(value: string): number {
-  const normalized = value.toLocaleLowerCase("ru");
-  if (/выс|high|уверен/.test(normalized)) return 0.9;
-  if (/низ|low/.test(normalized)) return 0.35;
-  return 0.65;
-}
-
-function legacyRoadmapLane(
-  projectId: string,
-  lane: StoredLearningRoadmapItem["lane"],
-  items: Array<{ title: string; done: boolean }>,
-  timestamp: string,
-): StoredLearningRoadmapItem[] {
-  return items.map((item, position) => ({
-    id: randomUUID(),
-    projectId,
-    lane,
-    title: item.title,
-    status: item.done ? "done" : "todo",
-    position,
-    rationale: "Импортировано из Markdown-roadmap",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }));
-}
-
-function readUtf8File(path: string): string {
-  const size = statSync(path).size;
-  if (size > 1_000_000) throw new HttpError(413, "Learning file is too large");
-  return readFileSync(path, "utf8");
 }
 
 function summarizeDiary(diary: string): {
@@ -2038,46 +1790,6 @@ function summarizeDiary(diary: string): {
     strongTopics: [...topics].sort((a, b) => b.score - a.score).slice(0, 6),
     assignments,
   };
-}
-
-function summarizeRoadmap(roadmap: string): {
-  currentStage: string | null;
-  current: Array<{ title: string; done: boolean }>;
-  nextSteps: Array<{ title: string; done: boolean }>;
-  later: Array<{ title: string; done: boolean }>;
-  completed: string[];
-} {
-  const current = parseChecklist(markdownSection(roadmap, "## Сейчас"));
-  const nextSteps = parseChecklist(markdownSection(roadmap, "## Следующие шаги"));
-  const later = parseChecklist(markdownSection(roadmap, "## Позже"));
-  const completed = [...current, ...nextSteps, ...later]
-    .filter((item) => item.done)
-    .map((item) => item.title);
-  const currentStage = current.find((item) => !item.done)?.title
-    ?? nextSteps.find((item) => !item.done)?.title
-    ?? completed.at(-1)
-    ?? null;
-  return {
-    currentStage,
-    current,
-    nextSteps,
-    later,
-    completed,
-  };
-}
-
-function parseChecklist(section: string): Array<{ title: string; done: boolean }> {
-  return section
-    .split(/\r?\n/)
-    .map((line) => {
-      const match = line.match(/^\s*-\s+\[([ xX])\]\s+(.+)$/);
-      if (!match) return null;
-      return {
-        title: stripMarkdown(match[2] ?? ""),
-        done: (match[1] ?? "").toLowerCase() === "x",
-      };
-    })
-    .filter((value): value is { title: string; done: boolean } => Boolean(value));
 }
 
 function parseKnowledgeTopics(section: string): LearningTopic[] {
@@ -2146,6 +1858,11 @@ function markdownSection(markdown: string, heading: string): string {
 }
 
 async function main(): Promise<void> {
+  if (process.env.RONIX_AUTH_MODE === "authentik") {
+    const { startMultiUserServer } = await import("./multi-user.js");
+    await startMultiUserServer();
+    return;
+  }
   const app = createApplication();
   app.server.once("error", (error) => {
     console.error(error);

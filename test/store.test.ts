@@ -49,6 +49,12 @@ test("persists projects, sessions, and ordered events", () => {
     assert.deepEqual(store.listRecentEvents("s1", 1).map((event) => event.sequence), [
       second.sequence,
     ]);
+    // UUID order must not reorder messages written in the same millisecond.
+    for (const id of ["z-first", "a-second"]) {
+      store.addMessage({ id, sessionId: "s1", turnId: null, role: "user", text: id, createdAt: now });
+    }
+    assert.deepEqual(store.listMessages("s1").map(message => message.id), ["z-first", "a-second"]);
+    assert.deepEqual(store.listMessages("s1", 1).map(message => message.id), ["a-second"]);
     assert.deepEqual(
       store.listEventsBefore("s1", second.sequence, 10).map((event) => event.sequence),
       [first.sequence],

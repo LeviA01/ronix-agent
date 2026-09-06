@@ -1,4 +1,5 @@
 import { state } from "./core/state.js";
+import { applyAccess } from "./core/access.js";
 import { $ } from "./core/dom.js";
 import { api } from "./core/api.js";
 import { storeString } from "./core/storage.js";
@@ -18,6 +19,7 @@ import { bindEventActions } from "./events/stream.js";
 import { renderEvents } from "./events/render.js";
 
 export async function bootstrap() {
+  applyAccess();
   applyTheme(state.theme);
   bindThemeControls();
   bindLayoutControls({
@@ -116,6 +118,10 @@ export async function bootstrap() {
     .catch(() => {});
 
   $("#logout")?.addEventListener("click", async () => {
+    if (globalThis.ronixAccess?.logoutUrl) {
+      location.assign(globalThis.ronixAccess.logoutUrl);
+      return;
+    }
     try {
       await api("/api/auth/logout", { method: "POST" });
     } finally {
@@ -127,6 +133,7 @@ export async function bootstrap() {
     await loadModels();
     await loadProjects();
     await setSurface(state.surface);
+    renderEvents();
     setConnection("ready");
   } catch (error) {
     setConnection("error");

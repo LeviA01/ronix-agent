@@ -1,4 +1,5 @@
 import { state } from "../core/state.js";
+import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
 import { storeString } from "../core/storage.js";
 import { loadSessions, resetProjectSessionView } from "./sessions.js";
@@ -8,7 +9,9 @@ import { loadMemory } from "./memory.js";
 const SURFACES = new Set(["projects", "chat", "memory"]);
 
 export async function setSurface(surface) {
-  const next = SURFACES.has(surface) ? surface : "projects";
+  const available = (value) => value === "chat" ? hasModule("chat") : value === "memory"
+    ? hasModule("development") : hasModule("development") || hasModule("learning");
+  const next = SURFACES.has(surface) && available(surface) ? surface : [...SURFACES].find(available) ?? "chat";
   if (state.surface !== next || next === "memory") resetProjectSessionView();
   state.surface = next;
   storeString("ronix-agent-surface", next);
@@ -47,4 +50,3 @@ export function bindSurfaces() {
     button.addEventListener("click", () => void setSurface(button.dataset.surface));
   });
 }
-

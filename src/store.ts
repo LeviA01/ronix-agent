@@ -842,13 +842,13 @@ export class Store {
           SELECT id, session_id, turn_id, role, text, created_at
           FROM messages
           WHERE session_id = ? AND created_at < ?
-          ORDER BY created_at DESC, id DESC LIMIT ?
+          ORDER BY created_at DESC, rowid DESC LIMIT ?
         `).all(sessionId, before, limit) as MessageRow[]
       : this.db.prepare(`
           SELECT id, session_id, turn_id, role, text, created_at
           FROM messages
           WHERE session_id = ?
-          ORDER BY created_at DESC, id DESC LIMIT ?
+          ORDER BY created_at DESC, rowid DESC LIMIT ?
         `).all(sessionId, limit) as MessageRow[];
     return rows.reverse().map(messageFromRow);
   }

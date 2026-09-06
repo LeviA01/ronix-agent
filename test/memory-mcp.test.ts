@@ -6,6 +6,20 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+test("chat-only users do not receive learning MCP tools", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ronix-chat-mcp-"));
+  const transport = new StdioClientTransport({ command: process.execPath,
+    args: ["--import", "tsx", join(process.cwd(), "src/memory-mcp.ts"), "--data-dir", directory],
+    cwd: process.cwd(), stderr: "pipe", env: { RONIX_USER_MODULES: '["chat"]' } });
+  const client = new Client({ name: "ronix-chat-tools-test", version: "1.0.0" });
+  try {
+    await client.connect(transport, { timeout: 5000 });
+    const names = (await client.listTools()).tools.map(tool => tool.name);
+    assert.ok(names.includes("ronix_memory_search"));
+    assert.equal(names.some(name => name.startsWith("ronix_learning_")), false);
+  } finally { await client.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("exposes Ronix memory tools over MCP stdio", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "ronix-memory-mcp-"));
   const transport = new StdioClientTransport({
@@ -29,7 +43,7 @@ test("exposes Ronix memory tools over MCP stdio", async (t) => {
     const names = listed.tools.map((tool) => tool.name);
     assert.ok(names.includes("ronix_memory_search"));
     assert.ok(names.includes("ronix_memory_remember"));
-    assert.ok(names.includes("ronix_learning_set_goal"));
+    assert.equal(names.some(name => name.startsWith("ronix_learning_")), false);
 
     const remembered = await client.callTool({
       name: "ronix_memory_remember",

@@ -1,4 +1,5 @@
 import { state } from "../core/state.js";
+import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
@@ -6,7 +7,6 @@ import { isLearningProject } from "../features/context.js";
 import {
   bindTheoryMaterialsView,
   loadLearning,
-  migrateLegacyLearning,
   renderLearningDashboard,
   renderTheoryMaterialsView,
 } from "../features/learning.js";
@@ -281,9 +281,6 @@ export function renderEvents(scrollToBottom = true) {
       const { renderLearningProgressMode } = await import("../features/learning.js");
       renderLearningProgressMode();
     });
-    container.querySelector("[data-migrate-learning]")?.addEventListener("click", () => {
-      void migrateLegacyLearning();
-    });
     container.querySelectorAll("[data-progress-tab]").forEach((button) => {
       button.addEventListener("click", () => {
         state.progressTab = button.dataset.progressTab;
@@ -333,7 +330,7 @@ export function renderEvents(scrollToBottom = true) {
         : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
       ? chatSurface
-        ? "Ask отвечает без изменений, Act работает в явно выбранном проекте."
+        ? (hasModule("development") ? "Ask отвечает без изменений, Act работает в явно выбранном проекте." : "Задайте вопрос в поле ниже.")
         : learning && state.learningMode === "practice"
         ? "Отправьте код или вопрос по заданию в поле ниже."
         : learning && state.learningMode === "theory"

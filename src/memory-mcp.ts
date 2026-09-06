@@ -16,7 +16,7 @@ const server = new McpServer(
     instructions: [
       "Ronix memory stores durable user preferences, project decisions, tasks, summaries and learning evidence.",
       "Search before assuming prior context. Save only durable information, never secrets, tokens, passwords, raw tool output or temporary chatter.",
-      "Use the session_id and scope identifiers supplied in the Ronix turn context. Learning updates belong in ronix_learning_record_evidence and ronix_learning_update_roadmap.",
+      "Use the session_id and scope identifiers supplied in the Ronix turn context. Learning diaries and roadmaps belong in project Markdown files, not in this database.",
     ].join(" "),
   },
 );
@@ -143,110 +143,6 @@ server.registerTool(
     memory.forget(input.id);
     return { forgotten: true, id: input.id };
   }),
-);
-
-server.registerTool(
-  "ronix_learning_get_state",
-  {
-    title: "Read Ronix learning state",
-    description: "Read the structured goal, topic mastery, recent evidence and roadmap for one learning project before teaching, reviewing work or choosing the next lesson.",
-    inputSchema: z.object({ project_id: z.string().uuid() }).strict(),
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (input) => toolResult(() => memory.learningState(input.project_id)),
-);
-
-server.registerTool(
-  "ronix_learning_set_goal",
-  {
-    title: "Set the learning goal",
-    description: "Set or correct the durable learning goal for one learning project after the learner states it explicitly.",
-    inputSchema: z.object({
-      project_id: z.string().uuid(),
-      goal: z.string().min(1).max(4_000),
-    }).strict(),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (input) => toolResult(() => memory.setLearningGoal(input.project_id, input.goal)),
-);
-
-server.registerTool(
-  "ronix_learning_record_evidence",
-  {
-    title: "Record learning evidence",
-    description: `Record one grounded observation about a learner and update the topic score atomically.
-
-Practice and ordinary evidence can change a score by at most 1, control work by at most 2, and theory checks do not change the numeric score. Always include a short observable rationale.`,
-    inputSchema: z.object({
-      project_id: z.string().uuid(),
-      topic: z.string().min(1).max(160),
-      kind: z.enum(["practice", "theory", "control", "note"]),
-      score_delta: z.number().int().min(-2).max(2),
-      result_score: z.number().min(0).max(10).nullable().default(null)
-        .describe("Optional assignment or control-work grade out of 10"),
-      rationale: z.string().min(1).max(2_000),
-      confidence: z.number().min(0).max(1).default(0.6),
-      session_id: z.string().uuid().nullable().default(null),
-    }).strict(),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-  },
-  async (input) => toolResult(() => memory.recordLearningEvidence({
-    projectId: input.project_id,
-    topic: input.topic,
-    kind: input.kind,
-    scoreDelta: input.score_delta,
-    resultScore: input.result_score,
-    rationale: input.rationale,
-    confidence: input.confidence,
-    sourceSessionId: input.session_id,
-  })),
-);
-
-server.registerTool(
-  "ronix_learning_update_roadmap",
-  {
-    title: "Update the learning roadmap",
-    description: "Create or update one ordered roadmap item when evidence changes the learning route. Reuse an existing item ID when changing status, lane or rationale.",
-    inputSchema: z.object({
-      project_id: z.string().uuid(),
-      id: z.string().uuid().optional(),
-      lane: z.enum(["now", "next", "later"]),
-      title: z.string().min(1).max(240),
-      status: z.enum(["todo", "done", "dropped"]).default("todo"),
-      position: z.number().int().min(0).default(0),
-      rationale: z.string().max(1_000).nullable().default(null),
-    }).strict(),
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (input) => toolResult(() => memory.updateRoadmap({
-    projectId: input.project_id,
-    ...(input.id ? { id: input.id } : {}),
-    lane: input.lane,
-    title: input.title,
-    status: input.status,
-    position: input.position,
-    rationale: input.rationale,
-  })),
 );
 
 async function main(): Promise<void> {

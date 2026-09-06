@@ -21,22 +21,6 @@ export async function loadLearning(projectId = $("#project")?.value) {
   }
 }
 
-export async function migrateLegacyLearning(projectId = $("#project")?.value) {
-  const preview = state.learning?.legacyMigration?.preview;
-  if (!projectId || !preview) return;
-  if (!confirm(`Импортировать старый Markdown-дневник: ${preview.topics} тем, ${preview.assignments} заданий и ${preview.roadmapItems} пунктов roadmap? После импорта файлы будут перенесены в learning/archive.`)) return;
-  try {
-    const { learning } = await api(`/api/projects/${encodeURIComponent(projectId)}/learning/migrate`, {
-      method: "POST",
-      body: JSON.stringify({ confirmed: true }),
-    });
-    state.learning = learning;
-    renderLearningProgressMode();
-  } catch (error) {
-    alert(error.message);
-  }
-}
-
 export function renderTheorySuggestions() {
   const container = $("#theory-suggestions");
   if (!container) return;
@@ -814,16 +798,6 @@ export function renderLearningDashboard() {
           Обновить
         </button>
       </header>
-
-      ${learning.legacyMigration?.available ? `
-        <aside class="learning-migration">
-          <div>
-            <strong>Найден старый Markdown-дневник</strong>
-            <p>${escapeHtml(learning.legacyMigration.preview?.goal || "Цель не указана")} · ${learning.legacyMigration.preview?.topics ?? 0} тем · ${learning.legacyMigration.preview?.roadmapItems ?? 0} пунктов roadmap</p>
-          </div>
-          <button type="button" data-migrate-learning>Импортировать и архивировать</button>
-        </aside>
-      ` : ""}
 
       <div class="learning-tabs" role="tablist" aria-label="Разделы прогресса">
         ${renderProgressTab("summary", "Обзор", tab)}
