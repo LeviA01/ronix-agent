@@ -7,6 +7,8 @@
             content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
         />
         <title>Ronix Agent</title>
+        <meta name="description" content="Ronix — рабочее пространство для проектов, диалогов и знаний." />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/styles.css" />
     </head>
     <body>
@@ -16,7 +18,7 @@
                     <div class="brand-mark">R</div>
                     <div>
                         <h1>Ronix</h1>
-                        <p>Codex control</p>
+                        <p>Рабочее пространство</p>
                     </div>
                     <span
                         id="connection"
@@ -35,10 +37,18 @@
                     </button>
                 </div>
 
-                <nav class="primary-nav" aria-label="Главные разделы">
-                    <button type="button" data-surface="projects" class="active">Проекты</button>
-                    <button type="button" data-surface="chat">Чат</button>
-                    <button type="button" data-surface="memory">Память</button>
+                <nav class="surface-navigation" aria-label="Главные разделы">
+                    <span id="surface-label" class="surface-label">Раздел</span>
+                    <div class="surface-picker">
+                        <button id="surface-trigger" class="surface-trigger" type="button"
+                            aria-haspopup="menu" aria-expanded="false" aria-controls="surface-menu"
+                            aria-labelledby="surface-label surface-current">
+                            <span id="surface-current-icon" class="surface-icon" aria-hidden="true"></span>
+                            <span id="surface-current">Проекты</span>
+                            <svg class="surface-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+                        </button>
+                        <div id="surface-menu" class="surface-menu" role="menu" aria-labelledby="surface-label" hidden></div>
+                    </div>
                 </nav>
 
                 <div id="project-navigation">
@@ -55,6 +65,7 @@
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 5v14M5 12h14"></path>
                                 </svg>
+                                <span>Новая сессия</span>
                             </button>
                         </div>
                     </div>
@@ -93,7 +104,12 @@
                         <button id="new-chat" class="new-chat-button" type="button" hidden>Новый</button>
                     </div>
                 </div>
+                <label id="session-search-wrap" class="session-search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
+                    <input id="session-search" type="search" placeholder="Найти сессию…" aria-label="Поиск сессий" autocomplete="off" />
+                </label>
                 <div id="sessions" class="session-list"></div>
+                <p id="session-search-empty" class="session-search-empty" role="status" hidden>Сессии не найдены</p>
 
                 <a id="admin-link" class="access-nav-button" href="/admin" aria-haspopup="dialog" hidden>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v2"/></svg>
@@ -313,6 +329,7 @@
                     <form id="prompt-form" class="composer" hidden>
                         <textarea
                             id="prompt"
+                            aria-label="Сообщение Ronix"
                             rows="1"
                             placeholder="Напишите задачу для Codex…"
                             required
@@ -347,6 +364,7 @@
                         </svg>
                         </button>
                     </form>
+                    <p class="composer-hint"><span>Enter — отправить</span><span>Shift + Enter — новая строка</span></p>
                 </div>
             </section>
             <button
@@ -465,22 +483,29 @@
                                         type="button"
                                         data-theme-option="terminal"
                                     >
-                                        <span>Terminal</span>
-                                        <small>Matrix green · amber</small>
+                                        <span>Графит</span>
+                                        <small>Тёплый серый и шалфей</small>
                                     </button>
                                     <button
                                         type="button"
                                         data-theme-option="neon"
                                     >
-                                        <span>Aurora</span>
-                                        <small>Teal · violet night</small>
+                                        <span>Хвоя</span>
+                                        <small>Глубокий зелёный и мята</small>
                                     </button>
                                     <button
                                         type="button"
                                         data-theme-option="moon"
                                     >
-                                        <span>Lunar</span>
-                                        <small>Silver glass · indigo</small>
+                                        <span>Сумерки</span>
+                                        <small>Холодный графит и серебро</small>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-theme-option="obsidian-gold"
+                                    >
+                                        <span>Obsidian Gold</span>
+                                        <small>Глубокий графит и шампанское золото</small>
                                     </button>
                                 </div>
                             </section>

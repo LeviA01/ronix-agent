@@ -68,6 +68,7 @@ async function addProject(folder, create = false, kind = "dev") {
 
 export function bindProjects() {
   $("#project")?.addEventListener("change", async () => {
+    $("#session-search").value = "";
     saveCurrentDraft();
     resetProjectSessionView();
     rememberProject($("#project").value || null);

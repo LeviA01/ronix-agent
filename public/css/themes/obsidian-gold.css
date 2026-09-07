@@ -1,0 +1,359 @@
+/* Obsidian Gold. Paint only: dimensions, spacing and layout stay in shared CSS.
+   All theme colors and effects are defined here, then mapped onto Ronix tokens. */
+body[data-theme="obsidian-gold"] {
+  color-scheme: dark;
+  --bg: #151b22;
+  --surface: #151b22;
+  --surface-raised: #222a33;
+  --surface-hover: color-mix(in srgb, var(--surface-raised), var(--text) 4%);
+  --panel: var(--surface);
+  --panel-deep: var(--bg);
+  --text: #f3f5f7;
+  --text-soft: rgb(243 245 247 / 74%);
+  /* Small labels sit on raised surfaces too; 45% is too faint there. */
+  --muted: rgb(243 245 247 / 62%);
+  --muted-strong: rgb(243 245 247 / 72%);
+  --accent: #c9a35a;
+  --accent-strong: #f2d18b;
+  --accent-ink: var(--bg);
+  --accent-soft: rgb(201 163 90 / 12%);
+  --accent-glow: rgb(242 209 139 / 16%);
+  --border: rgb(180 200 220 / 12%);
+  --border-strong: rgb(180 200 220 / 24%);
+  --border-gold: rgb(201 163 90 / 30%);
+  --border-gold-hover: rgb(242 209 139 / 52%);
+  --border-gold-focus: rgb(242 209 139 / 78%);
+  --border-container: rgb(201 163 90 / 20%);
+
+  /* Compatibility with existing components that build colors from RGB tokens. */
+  --terminal-black: var(--bg);
+  --terminal-navy: var(--surface);
+  --terminal-green: var(--accent);
+  --terminal-orange: var(--accent-strong);
+  --terminal-black-rgb: 11 15 20;
+  --terminal-navy-rgb: 21 27 34;
+  --terminal-green-rgb: 201 163 90;
+  --terminal-orange-rgb: 242 209 139;
+  --surface-rgb: 21 27 34;
+  --panel-rgb: 21 27 34;
+  --surface-raised-rgb: 34 42 51;
+  --white-rgb: 243 245 247;
+  --attention: var(--accent);
+  --attention-strong: var(--accent-strong);
+  --attention-soft: var(--accent-soft);
+  --warning: var(--accent-strong);
+  /* Keep the existing muted error color so errors remain distinct from selection. */
+  --hud-line: var(--border-gold);
+  --overlay: rgb(11 15 20 / 78%);
+  --glass: var(--surface);
+  --glass-border: var(--border);
+  --glass-highlight: rgb(243 245 247 / 4%);
+  --inner-highlight: inset 0 1px 0 var(--glass-highlight);
+  --elev-1: 0 8px 30px rgb(0 0 0 / 28%);
+  --elev-2: 0 12px 40px rgb(0 0 0 / 35%);
+  --elev-3: 0 18px 55px rgb(0 0 0 / 42%);
+  --panel-shadow: var(--elev-3);
+  --ring-focus: 0 0 0 2px var(--accent-soft), 0 0 24px rgb(201 163 90 / 8%);
+  --button-shadow: var(--inner-highlight), 0 4px 14px rgb(0 0 0 / 28%), 0 0 16px rgb(201 163 90 / 7%);
+  --button-shadow-hover: var(--inner-highlight), 0 6px 18px rgb(0 0 0 / 32%), 0 0 20px rgb(201 163 90 / 12%);
+  --selected-shadow: inset 2px 0 var(--accent);
+
+  --radius-xs: 8px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 18px;
+  --radius-2xl: 18px;
+  --duration-fast: 160ms;
+  --duration: 160ms;
+  --duration-press: 160ms;
+  --press-scale: 1;
+
+  --chat-background:
+    radial-gradient(ellipse at 8% 8%, rgb(201 163 90 / 5%), transparent 34%),
+    radial-gradient(ellipse at 85% 18%, rgb(80 120 160 / 5%), transparent 38%),
+    var(--bg);
+  --chat-background-size: auto;
+  --sidebar-background:
+    radial-gradient(ellipse at 0% 95%, rgb(201 163 90 / 5%), transparent 45%),
+    var(--surface);
+  --header-background: linear-gradient(110deg, var(--surface), rgb(21 27 34 / 82%));
+  --selected-background:
+    linear-gradient(90deg, rgb(201 163 90 / 15%), rgb(201 163 90 / 3%)),
+    var(--surface);
+  --primary-background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  --primary-hover-background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent-strong), var(--text) 12%));
+  --bubble-background: var(--surface-raised);
+  --user-bubble-background: linear-gradient(140deg, rgb(201 163 90 / 3%), transparent 65%), var(--surface-raised);
+  --brand-mark-background: var(--primary-background);
+  --brand-mark-shadow: var(--button-shadow);
+  --code-background: linear-gradient(180deg, rgb(34 42 51 / 35%), transparent), var(--surface);
+  --syntax-keyword: rgb(243 245 247 / 92%);
+  --syntax-string: color-mix(in srgb, var(--text) 78%, var(--surface-raised));
+  --syntax-value: var(--accent);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Depth comes from surfaces and edge lighting, never a blurred page overlay. */
+body[data-theme="obsidian-gold"] .sidebar {
+  background: transparent;
+  isolation: isolate;
+  box-shadow: none;
+}
+
+/* Inset the visual shell, not the contents. Menus remain free to overflow. */
+body[data-theme="obsidian-gold"] .sidebar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 8px;
+  pointer-events: none;
+  background: transparent;
+}
+
+@media (min-width: 761px) {
+  body[data-theme="obsidian-gold"] .sidebar { position: relative; }
+}
+
+body[data-theme="obsidian-gold"] .chat {
+  background: var(--chat-background);
+  border-color: var(--border-container);
+  box-shadow: var(--inner-highlight), var(--elev-3);
+  border-radius: var(--radius-xl);
+}
+
+body[data-theme="obsidian-gold"] .chat-head {
+  background: var(--header-background);
+  border-color: var(--border);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] :is(.brand-mark, .empty-icon > span) {
+  background: var(--primary-background);
+  color: var(--accent-ink);
+  box-shadow: var(--button-shadow);
+}
+
+body[data-theme="obsidian-gold"] :is(.brand-mark, .empty-icon) {
+  border-radius: var(--radius-md);
+}
+
+body[data-theme="obsidian-gold"] .empty-icon {
+  border-color: var(--border-gold);
+  background: var(--surface);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] :is(.session-row, .learning-mode, .surface-option) {
+  border-radius: var(--radius-sm);
+}
+
+body[data-theme="obsidian-gold"] :is(.session-row.active, .learning-mode.active) {
+  border-color: var(--border-gold);
+  background: var(--selected-background);
+  box-shadow: var(--selected-shadow);
+}
+
+body[data-theme="obsidian-gold"] .surface-option[aria-checked="true"] {
+  background: var(--selected-background);
+  box-shadow: inset 0 0 0 1px var(--border-gold);
+}
+
+body[data-theme="obsidian-gold"] :is(.session-row, .learning-mode):hover:not(.active) {
+  background: var(--surface-raised);
+  border-color: var(--border);
+}
+
+body[data-theme="obsidian-gold"] :is(.surface-trigger, .header-tool-button, .icon-button, .learning-toggle) {
+  color: var(--muted-strong);
+  background: var(--surface-raised);
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] :is(.surface-trigger .surface-icon, .starter-symbol, .message .avatar) {
+  color: var(--muted-strong);
+}
+
+body[data-theme="obsidian-gold"] :is(.surface-trigger, .header-tool-button)[aria-expanded="true"] {
+  color: var(--accent-strong);
+  border-color: var(--border-gold-hover);
+  background: var(--surface-raised);
+}
+
+body[data-theme="obsidian-gold"] .surface-trigger[aria-expanded="true"] .surface-icon {
+  color: var(--accent-strong);
+}
+
+body[data-theme="obsidian-gold"] :is(.surface-menu, .session-menu, .session-settings, .git-panel, .settings-panel, .limits-panel, .confirm-panel) {
+  background: var(--surface);
+  border-color: var(--border-container);
+  box-shadow: var(--inner-highlight), var(--panel-shadow);
+  border-radius: var(--radius-md);
+}
+
+body[data-theme="obsidian-gold"] :is(.settings-panel, .limits-panel, .confirm-panel) {
+  border-radius: var(--radius-xl);
+}
+
+/* Primary actions are the only substantial gold-filled controls. */
+body[data-theme="obsidian-gold"] :is(.composer button, .empty-action, .confirm-create, .add-project button, .settings-project-actions button[type="submit"]) {
+  background: var(--primary-background);
+  color: var(--accent-ink);
+  border-color: var(--border-gold);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--button-shadow);
+}
+
+body[data-theme="obsidian-gold"] :is(.composer button, .empty-action, .confirm-create, .add-project button, .settings-project-actions button[type="submit"]):not(:disabled):hover {
+  background: var(--primary-hover-background);
+  box-shadow: var(--button-shadow-hover);
+  transform: translateY(-1px);
+}
+
+body[data-theme="obsidian-gold"] #new-session {
+  color: var(--text-soft);
+  background: var(--surface-raised);
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] :is(.surface-trigger, .header-tool-button, .icon-button, #new-session, .settings-button, .limits-button, .copy-code, .git-sync-button, .refresh-learning):not(:disabled):hover {
+  color: var(--accent-strong);
+  border-color: var(--border-gold-hover);
+  background: var(--surface-hover);
+}
+
+body[data-theme="obsidian-gold"] :is(input, select, textarea) {
+  color: var(--text);
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+}
+
+body[data-theme="obsidian-gold"] :is(.project-row select, .add-project input, .setting-field select, .settings-project-main input, .memory-toolbar input, .memory-toolbar select, .memory-create-form textarea) {
+  background: var(--surface-raised);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] :is(input, select, textarea):focus {
+  border-color: var(--border-gold-focus);
+  box-shadow: var(--ring-focus);
+}
+
+body[data-theme="obsidian-gold"] :is(button, a, summary, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 3px;
+}
+
+body[data-theme="obsidian-gold"] .surface-option:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--border-gold-focus);
+}
+
+body[data-theme="obsidian-gold"] .composer {
+  background: var(--panel-deep);
+  border-color: var(--border-gold);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--inner-highlight), var(--elev-1);
+}
+
+body[data-theme="obsidian-gold"] .composer:focus-within {
+  background: var(--panel-deep);
+  border-color: var(--border-gold-focus);
+  box-shadow: var(--inner-highlight), var(--ring-focus), var(--elev-1);
+}
+
+body[data-theme="obsidian-gold"] .composer textarea,
+body[data-theme="obsidian-gold"] .composer textarea:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+body[data-theme="obsidian-gold"] .session-search:focus-within {
+  border-color: var(--border-gold-focus);
+  box-shadow: var(--ring-focus);
+}
+
+body[data-theme="obsidian-gold"] .session-search input {
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+body[data-theme="obsidian-gold"] :is(.bubble, .starter-actions button, .learning-card, .learning-stat, .learning-topic, .learning-assignment, .memory-card, .settings-project, .theme-options button) {
+  background: var(--surface-raised);
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--inner-highlight);
+}
+
+body[data-theme="obsidian-gold"] .message.agent .bubble {
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-theme="obsidian-gold"] .message.user .bubble {
+  background: var(--user-bubble-background);
+  border-color: var(--border);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-xs) var(--radius-md);
+}
+
+body[data-theme="obsidian-gold"] :is(.starter-actions button, .theme-options button):hover {
+  border-color: var(--border-gold-hover);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+body[data-theme="obsidian-gold"] :is(.theme-options button.active, .settings-tabs button.active, .learning-tabs button.active) {
+  border-color: var(--border-gold);
+  background: var(--selected-background);
+  color: var(--accent-strong);
+}
+
+body[data-theme="obsidian-gold"] .code-block {
+  background: var(--code-background);
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  transition: border-color var(--duration-fast) ease;
+}
+
+body[data-theme="obsidian-gold"] .code-block:hover { border-color: var(--border-gold); }
+body[data-theme="obsidian-gold"] .code-head { background: var(--surface-raised); }
+body[data-theme="obsidian-gold"] .syntax-keyword { color: var(--syntax-keyword); }
+body[data-theme="obsidian-gold"] :is(.syntax-string, .syntax-key) { color: var(--syntax-string); }
+body[data-theme="obsidian-gold"] .syntax-value { color: var(--syntax-value); }
+body[data-theme="obsidian-gold"] .inline-code { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--border-gold); }
+
+body[data-theme="obsidian-gold"] button:disabled,
+body[data-theme="obsidian-gold"] .app-shell button:disabled {
+  color: var(--muted);
+  background: var(--surface-raised);
+  border-color: var(--border);
+  box-shadow: none;
+  opacity: .65;
+  transform: none;
+}
+
+/* Retain the existing edge-to-edge mobile workspace and bottom sheets. */
+@media (max-width: 760px) {
+  body[data-theme="obsidian-gold"] .sidebar::before {
+    inset: 0;
+    border-left: 0;
+    border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
+    box-shadow: var(--inner-highlight), var(--elev-3);
+  }
+  body[data-theme="obsidian-gold"] .chat { border-radius: 0; box-shadow: none; }
+  body[data-theme="obsidian-gold"] :is(.settings-panel, .limits-panel, .confirm-panel) {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="obsidian-gold"] button:not(:disabled):hover { transform: none; }
+}

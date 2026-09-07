@@ -1,6 +1,6 @@
 import { loadStoredJson, loadString } from "./storage.js";
 
-const THEMES = new Set(["terminal", "neon", "moon"]);
+const THEMES = new Set(["terminal", "neon", "moon", "obsidian-gold"]);
 
 function storedTheme() {
   const theme = loadString("ronix-agent-theme", "terminal");

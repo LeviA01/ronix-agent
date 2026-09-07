@@ -8,6 +8,7 @@ export function applyTheme(theme) {
   storeString("ronix-agent-theme", state.theme);
   $$("[data-theme-option]").forEach((button) => {
     button.classList.toggle("active", button.dataset.themeOption === state.theme);
+    button.setAttribute("aria-pressed", String(button.dataset.themeOption === state.theme));
   });
 }
 

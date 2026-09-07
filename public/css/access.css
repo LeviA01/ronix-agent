@@ -1,6 +1,3 @@
-body[data-allow-chat="false"] [data-surface="chat"],
-body[data-allow-development="false"] [data-surface="memory"],
-body[data-allow-development="false"][data-allow-learning="false"] [data-surface="projects"],
 body[data-allow-development="false"] #toggle-git,
 body[data-allow-development="false"] #new-session,
 body[data-allow-development="false"] [data-chat-intent="act"],

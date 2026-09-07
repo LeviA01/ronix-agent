@@ -4,6 +4,8 @@ import { $ } from "../core/dom.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
 import { isLearningProject } from "../features/context.js";
+import { setPromptValue } from "../features/composer.js";
+import { setSidebarOpen } from "../layout/panels.js";
 import {
   bindTheoryMaterialsView,
   loadLearning,
@@ -322,7 +324,7 @@ export function renderEvents(scrollToBottom = true) {
         ? "Начните практику"
         : learning && state.learningMode === "theory"
           ? "Закройте пробел в теории"
-          : "Начните диалог"
+          : "Что сделаем сегодня?"
       : chatSurface
         ? "Создайте первый чат"
       : !hasProject
@@ -337,7 +339,7 @@ export function renderEvents(scrollToBottom = true) {
           ? "Выберите предложенную тему или задайте свой вопрос. Код писать не потребуется."
           : learning
             ? "Продолжите курс в поле ниже."
-          : "Опишите задачу в поле ниже."
+          : "Разберёмся в коде, исправим ошибку или создадим что-то новое. Начните с задачи."
       : chatSurface
         ? "Чаты объединяют контекст проектов, учёбы и общей памяти."
       : !hasProject
@@ -349,14 +351,29 @@ export function renderEvents(scrollToBottom = true) {
           : "Создайте первую сессию, чтобы начать работу с Codex.";
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">›_</div>
+        <div class="empty-icon" aria-hidden="true">R<span>↗</span></div>
+        <span class="empty-eyebrow">${chatSurface ? "Ваш собеседник" : "Пространство для идей и кода"}</span>
         <h3>${emptyTitle}</h3>
         <p>${emptyDescription}</p>
+        ${state.sessionId && !learning && !chatSurface ? `
+          <div class="starter-actions" aria-label="Примеры задач">
+            <button type="button" data-starter="Объясни, как устроен этот проект: основные модули, связи между ними и с чего начать изучение."><span class="starter-symbol" aria-hidden="true">⌘</span><strong>Разобраться в проекте</strong><span>Архитектура и ключевые файлы</span><span class="starter-arrow" aria-hidden="true">↗</span></button>
+            <button type="button" data-starter="Помоги найти и исправить ошибку. Вот что происходит: "><span class="starter-symbol" aria-hidden="true">↗</span><strong>Решить задачу</strong><span>От проблемы к работающему коду</span><span class="starter-arrow" aria-hidden="true">↗</span></button>
+          </div>` : ""}
+        ${!hasProject ? '<button class="empty-action" type="button" data-add-project>Добавить проект <span aria-hidden="true">↗</span></button>' : ""}
         ${hasProject && !hasSessions && !learning
           ? `<button class="empty-action" type="button" data-create-session>${chatSurface ? "Создать чат" : "Создать сессию"}</button>`
           : ""}
       </div>
     `;
+    container.querySelectorAll("[data-starter]").forEach((button) => {
+      button.addEventListener("click", () => setPromptValue(button.dataset.starter));
+    });
+    container.querySelector("[data-add-project]")?.addEventListener("click", () => {
+      setSidebarOpen(true);
+      document.querySelector(".add-project").open = true;
+      $("#project-folder").focus();
+    });
     container.querySelector("[data-create-session]")?.addEventListener("click", async () => {
       if (chatSurface) {
         const { createChat } = await import("../features/chats.js");

@@ -138,6 +138,8 @@ export function renderSessionMeta(session) {
 
 export function renderSessions() {
   const learning = state.surface === "projects" && isLearningProject();
+  $("#session-search-wrap").hidden = learning || state.surface === "memory";
+  $("#session-search-empty").hidden = true;
   getChat()?.classList.remove("learning-project");
   $("#sessions-label").textContent = state.surface === "chat" ? "Чаты" : learning ? "Учёба" : "Сессии";
   $("#session-count").textContent = learning ? "4" : String(state.sessions.length);
@@ -194,6 +196,7 @@ export function renderSessions() {
       `,
     )
     .join("");
+  filterSessions();
   document.querySelectorAll(".session").forEach((button) => {
     button.addEventListener("click", () => selectSession(button.dataset.id));
   });
@@ -438,7 +441,19 @@ export async function createSession() {
   }
 }
 
+export function filterSessions() {
+  const query = $("#session-search").value.trim().toLocaleLowerCase("ru");
+  const rows = [...document.querySelectorAll(".session-row")];
+  let visible = 0;
+  for (const row of rows) {
+    row.hidden = !row.querySelector(".session").textContent.toLocaleLowerCase("ru").includes(query);
+    if (!row.hidden) visible += 1;
+  }
+  $("#session-search-empty").hidden = !query || visible > 0 || state.surface === "memory" || isLearningProject();
+}
+
 export function bindSessions() {
+  $("#session-search").addEventListener("input", filterSessions);
   document.addEventListener("click", closeSessionMenus);
   $("#new-session")?.addEventListener("click", () => void createSession());
   $("#interrupt")?.addEventListener("click", async () => {

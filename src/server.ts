@@ -1089,6 +1089,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       ".html": "text/html; charset=utf-8",
       ".js": "text/javascript; charset=utf-8",
       ".css": "text/css; charset=utf-8",
+      ".svg": "image/svg+xml",
     };
     response.writeHead(200, {
       "content-type": contentTypes[extname(filePath)] ?? "application/octet-stream",
