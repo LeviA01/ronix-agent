@@ -1,12 +1,15 @@
 import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { sessionViewToken } from "../core/session-view.js";
 import { escapeHtml } from "../core/format.js";
 import { preferredModelSettings } from "./models.js";
 import { renderSessions, selectSession } from "./sessions.js";
 
 export async function loadChats() {
+  const isCurrent = sessionViewToken();
   const { chats } = await api("/api/chats");
+  if (!isCurrent() || state.surface !== "chat") return;
   state.chats = chats;
   state.sessions = chats;
   renderSessions();
@@ -116,4 +119,3 @@ export function bindChats() {
     state.chatActionProjectId = event.target.value || null;
   });
 }
-

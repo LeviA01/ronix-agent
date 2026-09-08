@@ -3,6 +3,7 @@ import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
+import { sessionViewToken } from "../core/session-view.js";
 import { isLearningProject } from "../features/context.js";
 import { setPromptValue } from "../features/composer.js";
 import { setSidebarOpen } from "../layout/panels.js";
@@ -18,6 +19,7 @@ import {
   renderUserInputQuestion,
 } from "./format-event.js";
 import { renderAgentMessage } from "./markdown.js";
+import { renderMcpForm } from "./mcp-form.js";
 import {
   isAgentMessage,
   isCommandItem,
@@ -30,16 +32,17 @@ import {
 export function setLocalSessionStatus(status) {
   if (!state.selectedSession) return;
   state.selectedSession = { ...state.selectedSession, status };
+  const isCurrent = sessionViewToken();
   import("../features/sessions.js").then(({ renderSessionMeta }) => {
-    renderSessionMeta(state.selectedSession);
+    if (isCurrent()) renderSessionMeta(state.selectedSession);
   });
 }
 
-export function updateLiveResponse(event) {
+export function updateLiveResponse(event, updateStatus = true) {
   if (event.type === "codex.turn.started") {
     state.liveTurnActive = true;
     state.liveResponse = { mode: "thinking", itemId: null, text: "", detail: "Анализирует задачу" };
-    setLocalSessionStatus("running");
+    if (updateStatus) setLocalSessionStatus("running");
     return;
   }
   if (event.type === "codex.item.agentMessage.delta") {
@@ -93,11 +96,11 @@ export function updateLiveResponse(event) {
   ) {
     state.liveTurnActive = false;
     state.liveResponse = null;
-    setLocalSessionStatus(event.type === "session.error" ? "error" : "ready");
+    if (updateStatus) setLocalSessionStatus(event.type === "session.error" ? "error" : "ready");
   }
 }
 
-export function renderLiveResponse(container = $("#events")) {
+export function renderLiveResponse(container = $("#events"), allowScroll = true) {
   if (!container) return;
   const existing = container.querySelector(".live-response");
   if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
@@ -112,7 +115,8 @@ export function renderLiveResponse(container = $("#events")) {
   }
 
   container.setAttribute("aria-busy", "true");
-  const shouldScroll = isNearBottom(container);
+  const shouldScroll = allowScroll && isNearBottom(container);
+  const isCurrent = sessionViewToken();
   const element = existing ?? document.createElement("article");
   element.className = `message agent live-response ${state.liveResponse.mode}`;
   element.innerHTML = `
@@ -136,7 +140,7 @@ export function renderLiveResponse(container = $("#events")) {
   if (!existing) container.append(element);
   if (shouldScroll) {
     requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
+      if (isCurrent()) container.scrollTop = container.scrollHeight;
     });
   }
 }
@@ -175,6 +179,25 @@ export function appendEvent(event, container) {
     const element = document.createElement("div");
     element.className = "technical-event";
     element.innerHTML = `<strong>${escapeHtml(view.label)}</strong>${escapeHtml(view.body)}`;
+    container.append(element);
+    return;
+  }
+
+  if (view.kind === "mcpInput") {
+    const element = document.createElement("article");
+    element.className = "approval-card user-input-card";
+    element.dataset.approvalId = view.approvalId;
+    const fields = renderMcpForm(view.payload);
+    element.innerHTML = `<strong>${escapeHtml(view.label)}</strong>
+      <p>${escapeHtml(view.body)}</p>
+      <form class="user-input-form" data-mcp-form>
+        ${fields ?? "<p>Эта форма пока не поддерживается в Ronix. Отмените запрос и уточните действие в чате.</p>"}
+        <div class="approval-actions">
+          <button type="button" data-approval-decision="decline">Отклонить</button>
+          <button type="button" data-approval-decision="cancel">Отмена</button>
+          ${fields !== null ? '<button type="submit" data-user-input-submit>Подтвердить</button>' : ""}
+        </div>
+      </form>`;
     container.append(element);
     return;
   }
@@ -251,6 +274,7 @@ function renderPendingApprovals(container) {
 
 export function appendVisibleEvent(event) {
   const container = $("#events");
+  const isCurrent = sessionViewToken();
   if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
     renderEvents(false);
     return;
@@ -267,7 +291,7 @@ export function appendVisibleEvent(event) {
   }
   if (shouldScroll) {
     requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
+      if (isCurrent()) container.scrollTop = container.scrollHeight;
     });
   }
 }
@@ -275,6 +299,7 @@ export function appendVisibleEvent(event) {
 export function renderEvents(scrollToBottom = true) {
   const container = $("#events");
   if (!container) return;
+  const isCurrent = sessionViewToken();
   container.innerHTML = "";
   if (isLearningProject() && state.learningMode === "progress") {
     container.innerHTML = renderLearningDashboard();
@@ -299,6 +324,18 @@ export function renderEvents(scrollToBottom = true) {
     if (approvalsHost) renderPendingApprovals(approvalsHost);
     return;
   }
+  if (state.sessionId && !state.historyReady) {
+    container.innerHTML = `<div class="history-status" role="status">
+      ${state.historyError
+        ? `<p>Не удалось загрузить историю: ${escapeHtml(state.historyError)}</p><button type="button" data-retry-history>Повторить</button>`
+        : '<p>Загружаем историю сообщений…</p>'}
+    </div>`;
+    container.querySelector("[data-retry-history]")?.addEventListener("click", async () => {
+      const { selectSession } = await import("../features/sessions.js");
+      if (isCurrent()) void selectSession(state.sessionId);
+    });
+    return;
+  }
   if (state.surface === "chat" && state.archivedMessages.length) {
     for (const message of state.archivedMessages) {
       appendEvent(message.role === "user"
@@ -312,7 +349,7 @@ export function renderEvents(scrollToBottom = true) {
   const events = state.showTechnical ? state.events : visibleEvents(state.events);
   const hasApprovals = Object.keys(state.approvals).length > 0;
   const hasArchivedMessages = state.surface === "chat" && state.archivedMessages.length > 0;
-  if (events.length === 0 && !hasApprovals && !hasArchivedMessages) {
+  if (events.length === 0 && !hasApprovals && !hasArchivedMessages && !state.hasMoreEvents && !state.liveResponse) {
     const chatSurface = state.surface === "chat";
     const hasProject = chatSurface || Boolean($("#project").value);
     const hasSessions = state.sessions.length > 0;
@@ -388,10 +425,12 @@ export function renderEvents(scrollToBottom = true) {
   renderHistoryButton(container);
   renderPendingApprovals(container);
   for (const event of events) appendEvent(event, container);
-  renderLiveResponse(container);
+  // Reopened history is already complete; do not replay entry animations.
+  for (const element of container.children) element.classList.add("history-item");
+  renderLiveResponse(container, false);
   if (scrollToBottom) {
     requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
+      if (isCurrent()) container.scrollTop = container.scrollHeight;
     });
   }
 }

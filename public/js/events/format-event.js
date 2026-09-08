@@ -31,6 +31,10 @@ export function formatVisibleEvent(event) {
   }
   if (type === "approval.requested") {
     const approvalId = payload.approvalId;
+    if (payload.method === "mcpServer/elicitation/request") {
+      return { kind: "mcpInput", approvalId, label: `${payload.serverName || "MCP"}: требуется подтверждение`,
+        body: payload.message || "", payload };
+    }
     if (payload.method === "item/tool/requestUserInput") {
       return {
         kind: "userInput",

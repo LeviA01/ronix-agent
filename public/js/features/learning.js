@@ -6,16 +6,21 @@ import { storeString } from "../core/storage.js";
 import { shuffledMatchingRightIds, shuffledOrderAvoiding } from "./material-randomization.js";
 import { clearPrompt, saveCurrentDraft, setPromptValue } from "./composer.js";
 import { renderGitPanel } from "./git.js";
+import { rememberSessionView, invalidateSessionView, sessionViewToken } from "../core/session-view.js";
 
 export async function loadLearning(projectId = $("#project")?.value) {
+  const isCurrent = sessionViewToken();
   if (!projectId) {
     state.learning = null;
     return null;
   }
   try {
-    state.learning = await api(`/api/projects/${encodeURIComponent(projectId)}/learning`);
+    const learning = await api(`/api/projects/${encodeURIComponent(projectId)}/learning`);
+    if (!isCurrent() || $("#project")?.value !== projectId) return null;
+    state.learning = learning;
     return state.learning;
   } catch (error) {
+    if (!isCurrent()) return null;
     state.learning = { available: false, error: error.message, missing: [] };
     return state.learning;
   }
@@ -992,6 +997,9 @@ function renderAssignment(assignment) {
 }
 
 export function clearSelectedSessionForProgress() {
+  rememberSessionView($("#events")?.scrollTop);
+  invalidateSessionView();
+  state.historyReady = false;
   state.source?.close();
   state.source = null;
   clearTimeout(state.reconnectTimer);

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type {
   AppServerNotification,
   AppServerRequest,
@@ -28,6 +29,7 @@ const APPROVAL_METHODS = new Set([
   "item/fileChange/requestApproval",
   "item/permissions/requestApproval",
   "item/tool/requestUserInput",
+  "mcpServer/elicitation/request",
   "execCommandApproval",
   "applyPatchApproval",
 ]);
@@ -288,7 +290,23 @@ export class SessionManager {
     if (!approval || approval.sessionId !== sessionId) throw new Error("Approval not found");
     const allowed = ["accept", "acceptForSession", "decline", "cancel", "answer"];
     if (!allowed.includes(decision)) throw new Error("Invalid approval decision");
-    if (approval.method === "item/tool/requestUserInput") {
+    if (approval.method === "mcpServer/elicitation/request") {
+      if (!["accept", "answer", "decline", "cancel"].includes(decision)) {
+        throw new Error("MCP requests require an individual response");
+      }
+      const action = decision === "answer" ? "accept" : decision;
+      let content: unknown = null;
+      if (action === "accept" && approval.payload.mode !== "url") {
+        content = answers ?? {};
+        const schema = approval.payload.requestedSchema;
+        if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+          throw new Error("MCP request has no valid form schema");
+        }
+        const result = new AjvJsonSchemaValidator().getValidator(schema)(content);
+        if (!result.valid) throw new Error("Проверьте поля формы: " + result.errorMessage);
+      }
+      this.codex.respond(approval.rpcId, { action, content, _meta: null });
+    } else if (approval.method === "item/tool/requestUserInput") {
       if (decision === "answer") {
         this.codex.respond(approval.rpcId, { answers: normalizeUserInputAnswers(answers) });
       } else {
@@ -319,7 +337,7 @@ export class SessionManager {
     this.listeners.delete(sessionId);
     for (const [id, approval] of this.pendingApprovals) {
       if (approval.sessionId === sessionId) {
-        this.codex.respond(approval.rpcId, { decision: "cancel" });
+        this.cancelApproval(approval);
         this.pendingApprovals.delete(id);
       }
     }
@@ -349,7 +367,7 @@ export class SessionManager {
       });
     }
     for (const approval of this.pendingApprovals.values()) {
-      this.codex.respond(approval.rpcId, { decision: "cancel" });
+      this.cancelApproval(approval);
     }
     this.pendingApprovals.clear();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
@@ -362,6 +380,14 @@ export class SessionManager {
     if (!threadId) return;
     const session = this.store.getSessionByThreadId(threadId);
     if (!session) return;
+
+    if (notification.method === "serverRequest/resolved") {
+      const approvalId = String(notification.params.requestId);
+      if (this.pendingApprovals.get(approvalId)?.sessionId === session.id) {
+        this.pendingApprovals.delete(approvalId);
+        this.publish(session.id, "approval.resolved", { approvalId, decision: "resolved" });
+      }
+    }
 
     this.publish(
       session.id,
@@ -443,6 +469,14 @@ export class SessionManager {
       method: request.method,
       ...request.params,
     });
+  }
+
+  private cancelApproval(approval: PendingApproval & { rpcId: RpcId }): void {
+    if (approval.method === "mcpServer/elicitation/request") {
+      this.codex.respond(approval.rpcId, { action: "cancel", content: null, _meta: null });
+    } else {
+      this.codex.respond(approval.rpcId, { decision: "cancel" });
+    }
   }
 
   private onlyRunningSession(): Session | null {

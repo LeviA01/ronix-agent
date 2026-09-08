@@ -475,6 +475,37 @@ test("serves security headers, rejects foreign origins, and pages event history"
     assert.equal(history.status, 200);
     const body = await history.json() as { events: Array<{ payload: { text: string } }> };
     assert.deepEqual(body.events.map((event) => event.payload.text), ["one"]);
+
+    const exactPage = await fetch(`${base}/api/sessions/${session.id}/events/history?limit=2`);
+    assert.equal((await exactPage.json() as { hasMore: boolean }).hasMore, false);
+    const shortPage = await fetch(`${base}/api/sessions/${session.id}/events/history?limit=1`);
+    const shortBody = await shortPage.json() as { hasMore: boolean; events: Array<{ payload: { text: string } }> };
+    assert.equal(shortBody.hasMore, true);
+    assert.deepEqual(shortBody.events.map((event) => event.payload.text), ["two"]);
+
+    store.addMessage({ id: "archive-one", sessionId: session.id, turnId: null, role: "user", text: "one", createdAt: now });
+    const archive = await fetch(`${base}/api/sessions/${session.id}/messages`);
+    assert.equal((await archive.json() as { lastSequence: number }).lastSequence, second.sequence);
+
+    // An explicit zero cursor means all events since an empty snapshot, not a tail.
+    const controller = new AbortController();
+    const stream = await fetch(`${base}/api/sessions/${session.id}/events?after=0&tail=1`, {
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]),
+    });
+    const reader = stream.body!.getReader();
+    let replay = "";
+    try {
+      while ((replay.match(/data: /g) ?? []).length < 2) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        replay += new TextDecoder().decode(value);
+      }
+      assert.match(replay, /"text":"one"/);
+      assert.match(replay, /"text":"two"/);
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    }
   } finally {
     await app.shutdown();
     rmSync(directory, { recursive: true, force: true });

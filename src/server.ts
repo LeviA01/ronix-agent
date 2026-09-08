@@ -897,6 +897,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
         const before = url.searchParams.get("before") ?? undefined;
         json(response, 200, {
           messages: store.listMessages(sessionId, limit, before),
+          lastSequence: store.latestEventSequence(sessionId),
         });
         return true;
       }
@@ -918,8 +919,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
       ) {
         const before = positiveInteger(url.searchParams.get("before"), Number.MAX_SAFE_INTEGER);
         const limit = boundedLimit(url.searchParams.get("limit"), config.eventHistoryLimit);
-        const events = store.listEventsBefore(sessionId, before, limit);
-        json(response, 200, { events, hasMore: events.length === limit });
+        const events = store.listEventsBefore(sessionId, before, limit + 1);
+        json(response, 200, { events: events.slice(-limit), hasMore: events.length > limit });
         return true;
       }
 
@@ -948,7 +949,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
           if (replaying) queued.push(event);
           else sendSse(response, event);
         });
-        const replay = after > 0
+        const replay = afterParam !== undefined && afterParam !== null
           ? store.listEvents(sessionId, after)
           : store.listRecentEvents(sessionId, tail);
         let lastSent = after;

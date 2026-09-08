@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { storeJson } from "../core/storage.js";
+import { rememberSessionView, restoreSessionView, invalidateSessionView, sessionViewToken, forgetSessionView } from "../core/session-view.js";
 import { escapeHtml, relativeTime, sessionTitle, statusLabel } from "../core/format.js";
 import { getChat, setGitOpen, setSettingsOpen, setSidebarOpen } from "../layout/panels.js";
 import { isLearningProject } from "./context.js";
@@ -30,9 +31,13 @@ import {
   selectLearningMode,
 } from "./learning.js";
 import { connectEvents } from "../events/stream.js";
-import { renderEvents } from "../events/render.js";
+import { renderEvents, renderLiveResponse, updateLiveResponse } from "../events/render.js";
 
 export function resetProjectSessionView() {
+  rememberSessionView($("#events")?.scrollTop);
+  invalidateSessionView();
+  state.historyReady = false;
+  state.historyError = null;
   state.source?.close();
   state.source = null;
   clearTimeout(state.reconnectTimer);
@@ -251,9 +256,18 @@ export async function selectSession(id) {
   setGitOpen(false);
   closeSessionMenus();
   saveCurrentDraft();
+  rememberSessionView($("#events")?.scrollTop);
+  invalidateSessionView();
   state.source?.close();
+  state.source = null;
   clearTimeout(state.reconnectTimer);
+  clearTimeout(state.sessionRefreshTimer);
+  if (state.liveRenderFrame) cancelAnimationFrame(state.liveRenderFrame);
+  state.liveRenderFrame = null;
   state.sessionId = id;
+  const isCurrent = sessionViewToken();
+  state.historyReady = false;
+  state.historyError = null;
   state.lastSequence = 0;
   state.firstSequence = 0;
   state.hasMoreEvents = false;
@@ -262,33 +276,64 @@ export async function selectSession(id) {
   state.liveTurnActive = false;
   state.liveResponse = null;
   state.selectedSession = null;
+  state.archivedMessages = [];
   const projectId = $("#project").value;
   if (state.surface === "projects" && projectId) rememberSession(projectId, id);
   if (state.surface === "chat") {
     state.navigation.chatId = id;
     storeJson("ronix-agent-navigation", state.navigation);
   }
-  renderEvents();
-  renderSessions();
-  const { session, approvals = [], lastSequence = 0 } = await api(`/api/sessions/${id}`);
+  const cached = restoreSessionView(id);
   const listedSession = state.sessions.find((item) => item.id === id);
-  const normalizedSession = {
-    ...(await normalizeSessionModel(session)),
-    ...(listedSession?.projectIds ? { projectIds: listedSession.projectIds } : {}),
-  };
-  if (normalizedSession.purpose === "chat") {
-    const archived = await api(`/api/sessions/${id}/messages?limit=500`);
-    state.archivedMessages = archived.messages;
-    state.lastSequence = lastSequence;
-  } else {
-    state.archivedMessages = [];
-  }
-  for (const approval of approvals) state.approvals[approval.id] = approval;
-  renderEvents();
-  state.selectedSession = normalizedSession;
-  renderSessionMeta(normalizedSession);
+  renderSessionMeta(cached?.selectedSession ?? listedSession ?? null);
+  if (!cached) $("#send").disabled = true;
   restoreDraft(id);
-  connectEvents(id, normalizedSession.purpose !== "chat");
+  renderEvents(!cached);
+  if (cached) $("#events").scrollTop = cached.scrollTop;
+  renderSessions();
+
+  try {
+    const chat = state.surface === "chat";
+    const [detail, history] = await Promise.all([
+      api(`/api/sessions/${id}`),
+      cached ? null : api(chat
+        ? `/api/sessions/${id}/messages?limit=500`
+        : `/api/sessions/${id}/events/history?limit=200`),
+    ]);
+    if (!isCurrent()) return;
+    const normalizedSession = {
+      ...(await normalizeSessionModel(detail.session)),
+      ...(listedSession?.projectIds ? { projectIds: listedSession.projectIds } : {}),
+    };
+    if (!isCurrent()) return;
+    if (!cached) {
+      if (chat) {
+        state.archivedMessages = history.messages;
+        state.lastSequence = history.lastSequence ?? detail.lastSequence ?? 0;
+      } else {
+        state.events = history.events;
+        state.firstSequence = history.events[0]?.sequence ?? 0;
+        state.lastSequence = history.events.at(-1)?.sequence ?? 0;
+        state.hasMoreEvents = history.hasMore;
+        for (const event of history.events) updateLiveResponse(event, false);
+      }
+    }
+    state.approvals = Object.fromEntries((detail.approvals ?? []).map((approval) => [approval.id, approval]));
+    if (normalizedSession.status !== "running") {
+      state.liveTurnActive = false;
+      state.liveResponse = null;
+    }
+    state.historyReady = true;
+    renderSessionMeta(normalizedSession);
+    if (!cached) renderEvents();
+    else renderLiveResponse($("#events"), false);
+    connectEvents(id);
+  } catch (error) {
+    if (!isCurrent()) return;
+    state.historyError = error.message;
+    if (cached) connectEvents(id);
+    else renderEvents(false);
+  }
 }
 
 async function changeSessionState(id, action) {
@@ -313,12 +358,15 @@ async function deleteSession(id) {
 
   try {
     await api(`/api/sessions/${id}`, { method: "DELETE" });
+    forgetSessionView(id);
     delete state.drafts[id];
     persistDrafts();
 
     if (state.sessionId === id) {
       state.source?.close();
       state.sessionId = null;
+      invalidateSessionView();
+      state.historyReady = false;
       state.events = [];
       state.lastSequence = 0;
       state.firstSequence = 0;
@@ -353,6 +401,7 @@ async function deleteSession(id) {
 }
 
 export async function loadSessions() {
+  const isCurrent = sessionViewToken();
   if (state.surface === "chat") {
     const { loadChats } = await import("./chats.js");
     await loadChats();
@@ -372,6 +421,7 @@ export async function loadSessions() {
   }
   if (project?.kind === "learning") {
     await loadLearning(projectId);
+    if (!isCurrent() || state.surface !== "projects" || $("#project").value !== projectId) return;
     state.sessions = [
       state.learning?.sessions?.course,
       state.learning?.sessions?.theory,
@@ -407,6 +457,7 @@ export async function loadSessions() {
   }
   state.learning = null;
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
+  if (!isCurrent() || state.surface !== "projects" || $("#project").value !== projectId) return;
   state.sessions = sessions;
   renderSessions();
   if (state.gitProjectId !== projectId && !state.gitLoading) void refreshGitStatus(projectId);

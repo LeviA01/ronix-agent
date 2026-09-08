@@ -1,6 +1,7 @@
 import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api, headers } from "../core/api.js";
+import { sessionViewToken } from "../core/session-view.js";
 import { isLearningProject } from "../features/context.js";
 import {
   loadLearning,
@@ -41,8 +42,10 @@ export function scheduleSessionRefresh() {
 
 async function refreshSelectedSession() {
   if (!state.sessionId) return;
+  const isCurrent = sessionViewToken();
   const { session } = await api(`/api/sessions/${state.sessionId}`);
   const { renderSessionMeta, loadSessions, renderSessions } = await import("../features/sessions.js");
+  if (!isCurrent()) return;
   const listed = state.sessions.find((item) => item.id === session.id);
   const mergedSession = { ...session, ...(listed?.projectIds ? { projectIds: listed.projectIds } : {}) };
   state.selectedSession = mergedSession;
@@ -65,7 +68,7 @@ async function refreshSelectedSession() {
   await loadSessions();
 }
 
-export function handleEvent(event, initial = false) {
+export function handleEvent(event) {
   if (event.sequence <= state.lastSequence) return;
   state.lastSequence = event.sequence;
   if (!state.firstSequence) state.firstSequence = event.sequence;
@@ -118,29 +121,23 @@ export function handleEvent(event, initial = false) {
   ) {
     void loadLearning().then(() => renderTheorySuggestions());
   }
-  if (initial && state.events.length === 200) {
-    state.hasMoreEvents = true;
-    renderEvents();
-  }
 }
 
-export function connectEvents(sessionId = state.sessionId, initial = false) {
+export function connectEvents(sessionId = state.sessionId) {
   if (!sessionId || sessionId !== state.sessionId) return;
   clearTimeout(state.reconnectTimer);
+  state.source?.close();
   const controller = new AbortController();
   state.source = { close: () => controller.abort() };
-  const query = initial && state.lastSequence === 0
-    ? "tail=200"
-    : `after=${state.lastSequence}`;
   void streamEvents(
-    `/api/sessions/${sessionId}/events?${query}`,
+    `/api/sessions/${sessionId}/events?after=${state.lastSequence}`,
     controller.signal,
     sessionId,
-    initial,
   );
 }
 
-async function streamEvents(path, signal, sessionId, initial) {
+async function streamEvents(path, signal, sessionId) {
+  const isCurrent = sessionViewToken();
   try {
     const response = await fetch(path, { headers: headers(), signal });
     if (response.status === 401) {
@@ -148,6 +145,7 @@ async function streamEvents(path, signal, sessionId, initial) {
       return;
     }
     if (!response.ok || !response.body) throw new Error(`SSE HTTP ${response.status}`);
+    if (signal.aborted || !isCurrent()) return;
     setConnection("connected");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -164,12 +162,12 @@ async function streamEvents(path, signal, sessionId, initial) {
           .split("\n")
           .find((line) => line.startsWith("data: "))
           ?.slice(6);
-        if (data && sessionId === state.sessionId) handleEvent(JSON.parse(data), initial);
+        if (data && !signal.aborted && isCurrent()) handleEvent(JSON.parse(data));
       }
     }
-    if (!signal.aborted && sessionId === state.sessionId) scheduleReconnect(sessionId);
+    if (!signal.aborted && isCurrent()) scheduleReconnect(sessionId);
   } catch (error) {
-    if (error.name !== "AbortError" && sessionId === state.sessionId) {
+    if (!signal.aborted && error.name !== "AbortError" && isCurrent()) {
       setConnection("reconnecting");
       scheduleReconnect(sessionId);
     }
@@ -182,27 +180,32 @@ function scheduleReconnect(sessionId) {
 }
 
 export async function loadOlderEvents(button) {
-  if (!state.sessionId || !state.firstSequence) return;
+  if (!state.sessionId || !state.firstSequence || state.historyLoading) return;
+  const isCurrent = sessionViewToken();
+  state.historyLoading = true;
   button.disabled = true;
   try {
     const container = $("#events");
-    const previousHeight = container.scrollHeight;
     const { events, hasMore } = await api(
       `/api/sessions/${state.sessionId}/events/history`
       + `?before=${state.firstSequence}&limit=200`,
     );
+    if (!isCurrent()) return;
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
     if (events.length) {
       state.events = [...events, ...state.events];
       state.firstSequence = events[0].sequence;
     }
     state.hasMoreEvents = hasMore;
     renderEvents(false);
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight - previousHeight;
-    });
+    container.scrollTop = container.scrollHeight - previousHeight + previousTop;
   } catch (error) {
+    if (!isCurrent()) return;
     button.disabled = false;
     alert(error.message);
+  } finally {
+    if (isCurrent()) state.historyLoading = false;
   }
 }
 
@@ -258,11 +261,12 @@ export function bindEventActions() {
     if (button) button.disabled = true;
     try {
       const { collectUserInputAnswers } = await import("./format-event.js");
+      const { collectMcpAnswers } = await import("./mcp-form.js");
       await api(`/api/sessions/${state.sessionId}/approvals/${card.dataset.approvalId}`, {
         method: "POST",
         body: JSON.stringify({
           decision: "answer",
-          answers: collectUserInputAnswers(form),
+          answers: form.hasAttribute("data-mcp-form") ? collectMcpAnswers(form) : collectUserInputAnswers(form),
         }),
       });
     } catch (error) {

@@ -2,7 +2,8 @@ import { state } from "../core/state.js";
 import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
 import { storeString } from "../core/storage.js";
-import { loadSessions, resetProjectSessionView } from "./sessions.js";
+import { loadSessions, resetProjectSessionView, selectSession } from "./sessions.js";
+import { hasSessionView } from "../core/session-view.js";
 import { loadChats } from "./chats.js";
 import { loadMemory } from "./memory.js";
 import { setSidebarOpen } from "../layout/panels.js";
@@ -78,7 +79,12 @@ export async function setSurface(surface) {
   $("#composer-shell")?.toggleAttribute("hidden", next === "memory");
   $("#toggle-settings").hidden = true;
   $("#toggle-git").hidden = true;
-  if (next !== "memory") renderEvents();
+  if (next !== "memory" && !state.historyReady) renderEvents();
+
+  const cachedId = next === "chat" ? state.navigation.chatId
+    : next === "projects" ? state.navigation.sessionsByProject?.[$("#project").value] : null;
+  const restoring = cachedId && cachedId !== state.sessionId && hasSessionView(cachedId)
+    ? selectSession(cachedId) : null;
 
   if (next === "chat") {
     await loadChats();
@@ -92,7 +98,8 @@ export async function setSurface(surface) {
   } else {
     await loadSessions();
   }
-  if (state.surface === next && next !== "memory") renderEvents();
+  await restoring;
+  if (state.surface === next && next !== "memory" && !state.sessionId) renderEvents();
 }
 
 export function bindSurfaces() {

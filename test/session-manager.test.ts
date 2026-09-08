@@ -208,6 +208,69 @@ test("routes user input requests and returns answers", async () => {
   }
 });
 
+for (const decision of ["accept", "decline", "cancel"] as const) {
+  test(`routes Outline MCP confirmation in a chat: ${decision}`, async () => {
+    const f = fixture();
+    try {
+      const session = f.manager.createSession(null);
+      await f.manager.startTurn(session.id, "Найди документ в Outline");
+      f.codex.serverRequest("outline-1", "mcpServer/elicitation/request", {
+        threadId: "thread-1", turnId: "turn-1", serverName: "outline",
+        mode: "form", message: "Allow Outline tool call?",
+        requestedSchema: { type: "object", properties: {} },
+      });
+      assert.equal(f.codex.responses.length, 0, "must wait for the user instead of rejecting MCP");
+      assert.equal(f.manager.listApprovals(session.id)[0]?.method, "mcpServer/elicitation/request");
+      assert.equal(f.store.listEvents(session.id).at(-1)?.type, "approval.requested");
+      f.manager.respondToApproval(session.id, "outline-1", decision);
+      assert.deepEqual(f.codex.responses, [{ id: "outline-1", result: {
+        action: decision, content: decision === "accept" ? {} : null, _meta: null,
+      } }]);
+      assert.equal(f.manager.listApprovals(session.id).length, 0);
+    } finally { f.close(); }
+  });
+}
+
+test("validates MCP form answers and keeps invalid or cross-session responses pending", async () => {
+  const f = fixture();
+  try {
+    const session = f.manager.createSession(null);
+    const other = f.manager.createSession(null);
+    await f.manager.startTurn(session.id, "Outline");
+    f.codex.serverRequest(45, "mcpServer/elicitation/request", {
+      threadId: "thread-1", serverName: "outline", mode: "form", message: "Confirm",
+      requestedSchema: { type: "object", properties: { confirmed: { type: "boolean" } }, required: ["confirmed"] },
+    });
+    assert.throws(() => f.manager.respondToApproval(other.id, "45", "accept"), /Approval not found/);
+    assert.throws(() => f.manager.respondToApproval(session.id, "45", "acceptForSession"), /individual response/);
+    assert.throws(() => f.manager.respondToApproval(session.id, "45", "answer", {}), /Проверьте поля/);
+    assert.equal(f.codex.responses.length, 0);
+    assert.equal(f.manager.listApprovals(session.id).length, 1);
+    f.manager.respondToApproval(session.id, "45", "answer", { confirmed: true });
+    assert.deepEqual(f.codex.responses[0]?.result, { action: "accept", content: { confirmed: true }, _meta: null });
+  } finally { f.close(); }
+});
+
+test("MCP URL confirmation, server resolution, and shutdown use the MCP protocol", async () => {
+  const f = fixture();
+  try {
+    const session = f.manager.createSession(null);
+    await f.manager.startTurn(session.id, "Outline");
+    const params = { threadId: "thread-1", serverName: "outline", mode: "url",
+      message: "Sign in", url: "https://example.com/login", elicitationId: "login-1" };
+    f.codex.serverRequest(46, "mcpServer/elicitation/request", params);
+    f.manager.respondToApproval(session.id, "46", "answer", {});
+    assert.deepEqual(f.codex.responses[0]?.result, { action: "accept", content: null, _meta: null });
+    f.codex.serverRequest(47, "mcpServer/elicitation/request", params);
+    f.codex.notify("serverRequest/resolved", { threadId: "thread-1", requestId: 47 });
+    assert.equal(f.manager.listApprovals(session.id).length, 0);
+    assert.equal(f.codex.responses.length, 1);
+    f.codex.serverRequest(48, "mcpServer/elicitation/request", params);
+    await f.manager.shutdown();
+    assert.deepEqual(f.codex.responses[1], { id: 48, result: { action: "cancel", content: null, _meta: null } });
+  } finally { f.close(); }
+});
+
 test("marks an active session failed if app-server exits", async () => {
   const testFixture = fixture();
   try {
