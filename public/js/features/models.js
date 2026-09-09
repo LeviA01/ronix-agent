@@ -33,6 +33,7 @@ export function rememberModelSettings(session) {
 }
 
 export function preferredModelSettings() {
+  if (state.surface === "chat" && globalThis.ronixAccess?.user?.role === "user") return {};
   if (state.models.length === 0) return {};
   const model = state.models.find(
     (item) => item.model === state.modelPreference.model,
@@ -46,6 +47,10 @@ export function preferredModelSettings() {
 }
 
 export function currentModel(session = state.selectedSession) {
+  if (session?.purpose === "chat" && globalThis.ronixAccess?.user?.role === "user") {
+    const assigned = globalThis.ronixAccess.user.chatModel;
+    return (assigned ? state.models.find(model => model.model === assigned) : state.models.find(model => model.isDefault)) ?? null;
+  }
   return state.models.find((model) => model.model === session?.model)
     ?? state.models.find((model) => model.isDefault)
     ?? state.models[0]
@@ -101,11 +106,14 @@ export function renderModelControls(session) {
     : selectedModel.defaultReasoningEffort;
   effortSelect.value = selectedEffort;
   const disabled = !session || session.status === "running";
-  modelSelect.disabled = disabled;
+  const locked = session?.purpose === "chat" && globalThis.ronixAccess?.user?.role === "user";
+  modelSelect.disabled = disabled || locked;
+  modelSelect.title = locked ? "Модель чата назначает администратор" : "";
   effortSelect.disabled = disabled;
 }
 
 export async function normalizeSessionModel(session) {
+  if (session?.purpose === "chat" && globalThis.ronixAccess?.user?.role === "user") return session;
   if (!session.model || state.models.length === 0 || session.status === "running") {
     return session;
   }

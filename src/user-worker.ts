@@ -6,7 +6,9 @@ import type { UserModule } from "./access.js";
 const socket = process.env.RONIX_WORKER_SOCKET;
 if (!socket) throw new Error("RONIX_WORKER_SOCKET is required");
 const modules = JSON.parse(process.env.RONIX_USER_MODULES ?? "[]") as UserModule[];
-const app = createApplication({ config, access: { modules },
+const app = createApplication({ config, access: { modules,
+  role: process.env.RONIX_USER_ROLE === "admin" ? "admin" : "user",
+  chatModel: process.env.RONIX_CHAT_MODEL || null },
   publicDir: fileURLToPath(new URL("../../public", import.meta.url)) });
 app.server.listen(socket, () => process.stdout.write("RONIX_WORKER_READY\n"));
 app.server.on("error", error => {

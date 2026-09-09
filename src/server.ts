@@ -107,6 +107,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
   let usagePending: Promise<unknown> | null = null;
   let modelCache: { value: CodexModel[]; expiresAt: number } | null = null;
   let modelPending: Promise<CodexModel[]> | null = null;
+  const chatModelLocked = options.access?.role === "user";
+  async function assignedChatSettings(effort?: string) {
+    return resolveModelSettings(await getModels(), null, null, options.access?.chatModel ?? undefined, effort);
+  }
   const generatingMaterials = new Set<string>();
   const allowed = (module: UserModule) => !options.access || options.access.modules.includes(module);
   const projectModule = (kind: string): UserModule => kind === "learning" ? "learning" : "development";
@@ -356,7 +360,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       for (const id of projectIds) requireModule(options.access, projectModule(store.getProject(id)!.kind));
       const requestedModel = optionalString(body.model, "model");
       const requestedEffort = optionalString(body.reasoningEffort, "reasoningEffort");
-      const modelSettings = requestedModel || requestedEffort
+      const modelSettings = chatModelLocked ? await assignedChatSettings(requestedEffort) : requestedModel || requestedEffort
         ? resolveModelSettings(await getModels(), null, null, requestedModel, requestedEffort)
         : {};
       let chat = sessions.createSession(null, modelSettings, "chat");
@@ -984,6 +988,13 @@ export function createApplication(options: ApplicationOptions = {}): Application
           : requireString(body.actionProjectId, "actionProjectId");
         if (intent === "act") requireModule(options.access, "development");
         try {
+          if (session.purpose === "chat" && chatModelLocked) {
+            const settings = await assignedChatSettings();
+            sessions.updateSettings(sessionId, {
+              ...settings,
+              ...(session.model === settings.model && session.reasoningEffort ? { reasoningEffort: session.reasoningEffort } : {}),
+            });
+          }
           await sessions.startTurn(sessionId, requireString(body.prompt, "prompt"), {
             ...(intent ? { intent } : {}),
             ...(actionProjectId ? { actionProjectId } : {}),
@@ -1032,7 +1043,14 @@ export function createApplication(options: ApplicationOptions = {}): Application
         }
         const requestedModel = optionalString(body.model, "model");
         const requestedEffort = optionalString(body.reasoningEffort, "reasoningEffort");
-        if (requestedModel || requestedEffort) {
+        if (session.purpose === "chat" && chatModelLocked && (requestedModel || requestedEffort)) {
+          const assigned = await assignedChatSettings(requestedEffort);
+          if (requestedModel && requestedModel !== assigned.model) {
+            throw new HttpError(403, "Модель чата назначает администратор");
+          }
+          Object.assign(update, assigned);
+        }
+        else if (requestedModel || requestedEffort) {
           Object.assign(
             update,
             resolveModelSettings(

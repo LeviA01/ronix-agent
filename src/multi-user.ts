@@ -72,7 +72,7 @@ export function createMultiUserServer(options: MultiUserOptions) {
         }
         const match = /^\/api\/admin\/users\/([a-zA-Z0-9-]+)$/.exec(url.pathname);
         if (match && request.method === "PATCH") {
-          const body = await readJson<{ role?: unknown; disabled?: unknown; modules?: unknown }>(request);
+          const body = await readJson<{ role?: unknown; disabled?: unknown; modules?: unknown; chatModel?: unknown }>(request);
           const updated = access.update(match[1]!, body);
           await stopUser(updated.id);
           json(response, 200, { user: updated }); return;

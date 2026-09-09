@@ -176,7 +176,7 @@ export class SessionManager {
         threadId: thread.thread.id,
         input: [{
           type: "text",
-          text: this.promptWithMemory(session, promptForSession(session, prompt)),
+          text: this.promptWithMemory(session, promptForSession(session, prompt, intent)),
         }],
         ...(session.model ? { model: session.model } : {}),
         ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
@@ -560,7 +560,21 @@ function approvalPolicy(sandboxMode: SandboxMode): "never" | "on-request" {
   return sandboxMode === "danger-full-access" ? "never" : "on-request";
 }
 
-function promptForSession(session: Session, prompt: string): string {
+function promptForSession(session: Session, prompt: string, intent: ChatIntent = "ask"): string {
+  if (session.purpose === "chat") {
+    return [
+      "[Служебный контекст Ronix: чат]",
+      intent === "act"
+        ? "Режим Act: разрешена работа с файлами выбранного проекта в рамках запроса пользователя."
+        : "Режим Ask: локальные файлы доступны только для чтения. Для изменения файлов нужен Act и выбранный проект.",
+      "Ask/Act управляет работой с локальными файлами. Для доступных инструментов Outline MCP переключение в Act и выбор проекта не требуются.",
+      "По явной просьбе пользователя создавай и редактируй документы через доступные инструменты Outline MCP, в том числе в Ask. Соблюдай права сервера и запрошенные им подтверждения.",
+      "Если инструмент недоступен или вернул ошибку, сообщи фактическую причину. Не считай read-only файловой системы доказательством запрета записи в Outline и не утверждай, что документ сохранён, без успешного результата инструмента.",
+      "",
+      "Сообщение пользователя:",
+      prompt,
+    ].join("\n");
+  }
   if (session.purpose === "materials") {
     return [
       "[Обязательный контекст Ronix: генератор учебных материалов]",
@@ -576,7 +590,7 @@ function promptForSession(session: Session, prompt: string): string {
       prompt,
     ].join("\n");
   }
-  if (session.purpose === "general" || session.purpose === "chat") return prompt;
+  if (session.purpose === "general") return prompt;
   const mentorContext = [
     "[Служебный контекст Ronix: учебная сессия]",
     "Только в этой сессии работай как AI-наставник; учебная роль не распространяется на другие сессии проекта.",

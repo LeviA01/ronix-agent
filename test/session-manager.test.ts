@@ -367,7 +367,11 @@ test("keeps general sessions and chats in development mode even in learning proj
       });
       const turn = testFixture.codex.calls.findLast((call) => call.method === "turn/start");
       const params = turn?.params as { input: Array<{ text: string }> };
-      assert.equal(params.input[0]?.text, prompt);
+      const text = params.input[0]?.text ?? "";
+      assert.ok(text.endsWith(prompt));
+      assert.doesNotMatch(text, /AI-наставник|Перед учебной работой прочитай/);
+      if (session.purpose === "chat") assert.match(text, /Режим Act/);
+      else assert.equal(text, prompt);
     }
   } finally {
     testFixture.close();

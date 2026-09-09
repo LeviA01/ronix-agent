@@ -153,8 +153,10 @@ export function scheduleLiveRender() {
   });
 }
 
-export function appendEvent(event, container) {
-  const view = state.showTechnical ? formatTechnicalEvent(event) : formatVisibleEvent(event);
+export function appendEvent(event, container, interactive = false) {
+  // Pending requests belong beside the composer, never among old messages.
+  if (event.type === "approval.requested" && !interactive) return;
+  const view = state.showTechnical && !interactive ? formatTechnicalEvent(event) : formatVisibleEvent(event);
   if (!view) return;
 
   if (view.kind === "message") {
@@ -262,14 +264,34 @@ function renderHistoryButton(container) {
   container.append(button);
 }
 
-function renderPendingApprovals(container) {
-  for (const approval of Object.values(state.approvals)) {
+export function renderPendingApprovals() {
+  const dock = $("#approval-dock");
+  const container = $("#approval-dock-cards");
+  if (!dock || !container) return;
+  const sessionId = state.sessionId ?? "";
+  if (container.dataset.sessionId !== sessionId) {
+    container.replaceChildren();
+    container.dataset.sessionId = sessionId;
+  }
+  const approvals = sessionId ? Object.values(state.approvals) : [];
+  const ids = new Set(approvals.map(approval => String(approval.id)));
+  for (const card of [...container.children]) {
+    if (!ids.has(card.dataset.approvalId)) card.remove();
+  }
+  for (const approval of approvals) {
+    // Keep existing form nodes so streaming and other requests cannot erase answers or focus.
+    if ([...container.children].some(card => card.dataset.approvalId === String(approval.id))) continue;
     const event = {
       type: "approval.requested",
       payload: { approvalId: approval.id, method: approval.method, ...approval.payload },
     };
-    appendEvent(event, container);
+    appendEvent(event, container, true);
+    container.lastElementChild.dataset.sessionId = sessionId;
   }
+  dock.hidden = approvals.length === 0;
+  const status = approvals.length ? `Нужен ваш ответ · ${approvals.length}. Агент ждёт подтверждения ниже.` : "";
+  const label = $("#approval-dock-status");
+  if (label.textContent !== status) label.textContent = status;
 }
 
 export function appendVisibleEvent(event) {
@@ -297,6 +319,7 @@ export function appendVisibleEvent(event) {
 }
 
 export function renderEvents(scrollToBottom = true) {
+  renderPendingApprovals();
   const container = $("#events");
   if (!container) return;
   const isCurrent = sessionViewToken();
@@ -320,8 +343,6 @@ export function renderEvents(scrollToBottom = true) {
   if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
     container.innerHTML = renderTheoryMaterialsView();
     bindTheoryMaterialsView(container);
-    const approvalsHost = container.querySelector("[data-materials-approvals]");
-    if (approvalsHost) renderPendingApprovals(approvalsHost);
     return;
   }
   if (state.sessionId && !state.historyReady) {
@@ -369,7 +390,7 @@ export function renderEvents(scrollToBottom = true) {
         : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
       ? chatSurface
-        ? (hasModule("development") ? "Ask отвечает без изменений, Act работает в явно выбранном проекте." : "Задайте вопрос в поле ниже.")
+        ? (hasModule("outline") ? "Задайте вопрос или попросите создать или обновить документ в Outline." : "Задайте вопрос в поле ниже.")
         : learning && state.learningMode === "practice"
         ? "Отправьте код или вопрос по заданию в поле ниже."
         : learning && state.learningMode === "theory"
@@ -423,7 +444,6 @@ export function renderEvents(scrollToBottom = true) {
     return;
   }
   renderHistoryButton(container);
-  renderPendingApprovals(container);
   for (const event of events) appendEvent(event, container);
   // Reopened history is already complete; do not replay entry animations.
   for (const element of container.children) element.classList.add("history-item");

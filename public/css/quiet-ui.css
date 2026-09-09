@@ -130,13 +130,13 @@ body[data-theme] {
 .surface-icon { display: grid; flex: 0 0 20px; place-items: center; color: var(--muted-strong); }
 .surface-picker svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .surface-trigger .surface-icon { color: var(--accent); }
-.surface-chevron { margin-left: auto; color: var(--muted); transition: transform var(--duration-fast) var(--ease-out); }
-.surface-trigger[aria-expanded="true"] .surface-chevron { transform: rotate(180deg); }
+.surface-chevron { margin-left: auto; color: var(--muted); transform: rotate(-90deg); transition: transform var(--duration-fast) var(--ease-out); }
+.surface-trigger[aria-expanded="true"] .surface-chevron { transform: rotate(90deg); }
 .surface-menu {
   position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
+  top: 0;
+  left: min(calc(100% + 8px), calc(100vw - 100% - 36px));
+  width: 100%;
   display: grid;
   gap: 3px;
   padding: 6px;
@@ -145,7 +145,7 @@ body[data-theme] {
   background: var(--surface);
   box-shadow: var(--elev-2);
   animation: surface-menu-in 140ms var(--ease-out);
-  transform-origin: top;
+  transform-origin: left;
 }
 .surface-option {
   display: flex;
@@ -169,7 +169,7 @@ body[data-theme] {
 .surface-option-text small { font-size: 10px; line-height: 1.4; color: var(--muted); }
 .surface-picker .surface-check { visibility: hidden; flex: 0 0 15px; width: 15px; height: 15px; margin-left: auto; color: var(--accent); }
 .surface-option[aria-checked="true"] .surface-check { visibility: visible; }
-@keyframes surface-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes surface-menu-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: translateX(0); } }
 .session-search svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 .project-picker { padding: 0; }
 .project-picker label, .sessions-head { font-size: 11px; letter-spacing: .04em; font-weight: 500; text-transform: none; }

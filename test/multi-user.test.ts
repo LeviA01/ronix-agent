@@ -30,6 +30,13 @@ test("admin identity is explicit, new users have no modules, and the last admin 
     assert.throws(() => access.update(first.id, { modules: ["root"] }), /Некорректные/);
     const renamed = access.identify({ subject: "owner", username: "renamed", name: "Owner" });
     assert.equal(renamed.id, owner.id);
+    assert.equal(first.chatModel, null);
+    const assigned = access.update(first.id, { chatModel: "model-assigned" });
+    assert.equal(assigned.chatModel, "model-assigned");
+    assert.equal(assigned.revision, first.revision + 1);
+    assert.equal(access.identify({ subject: "stranger", username: "renamed", name: "" }).chatModel, "model-assigned");
+    assert.throws(() => access.update(first.id, { chatModel: "bad\nmodel" }), /Некорректная модель/);
+    assert.equal(access.update(first.id, { chatModel: null }).chatModel, null);
   } finally { access.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -37,16 +44,29 @@ test("gateway isolates users, enforces module rights, and applies revocation to 
   const dir = mkdtempSync(join(tmpdir(), "ronix-multi-"));
   const secret = "x".repeat(40);
   const workers: string[] = [];
+  const clients = new Map<string, FakeAppServer>();
+  const stores = new Map<string, Store>();
   const gateway = createMultiUserServer({
     accessDirectory: join(dir, "access"), proxySecret: secret, adminSubjects: ["owner"],
     trustedAddresses: ["127.0.0.1"],
     async createRuntime(user) {
       const root = join(dir, user.id); mkdirSync(root, { recursive: true });
       const store = new Store(join(root, "data"));
-      const sessions = new SessionManager(store, new FakeAppServer(), 100);
+      class ModelsServer extends FakeAppServer {
+        override async request<T>(method: string, params?: unknown): Promise<T> {
+          const result = await super.request<T>(method, params);
+          if (method === "model/list") {
+            const list = result as { data: Array<Record<string, unknown>> };
+            list.data.push({ ...list.data[0], id: "model-assigned", model: "model-assigned", isDefault: false });
+          }
+          return result;
+        }
+      }
+      const client = new ModelsServer(); clients.set(user.id, client); stores.set(user.id, store);
+      const sessions = new SessionManager(store, client, 100);
       const app = createApplication({ config: { ...config, authKey: "", host: "127.0.0.1", trustProxy: true,
         deploymentMode: "local", accessMode: "local", dataDir: join(root, "data"), projectRoots: [root] },
-        store, sessions, access: { modules: user.modules } });
+        store, sessions, access: { modules: user.modules, role: user.role, chatModel: user.chatModel } });
       // Short Unix paths also work on platforms with a small sockaddr_un limit.
       const socket = join(dir, `${workers.length}.sock`); workers.push(user.id);
       await new Promise<void>(resolve => app.server.listen(socket, resolve));
@@ -72,9 +92,27 @@ test("gateway isolates users, enforces module rights, and applies revocation to 
     assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { modules: ["chat"] })).status, 200);
     const aliceChat = (await data(await call("owner", "/api/chats", "POST", {}))).chat;
     const bobChat = (await data(await call("bob", "/api/chats", "POST", {}))).chat;
+    assert.equal((await call("bob", `/api/admin/users/${bob.id}`, "PATCH", { chatModel: "model-assigned" })).status, 403);
+    assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { chatModel: "model-assigned" })).status, 200);
+    assert.equal((await call("bob", `/api/sessions/${bobChat.id}/settings`, "POST", { model: "gpt-5.5" })).status, 403);
+    const forgedChat = await call("bob", "/api/chats", "POST", { model: "gpt-5.5" });
+    assert.equal(forgedChat.status, 201);
+    assert.equal((await forgedChat.json() as { chat: { model: string } }).chat.model, "model-assigned");
+    assert.equal((await call("bob", `/api/sessions/${bobChat.id}/turns`, "POST", { prompt: "Hello" })).status, 202);
+    const resumedClient = clients.get(bob.id)!;
+    const turn = resumedClient.calls.findLast(item => item.method === "turn/start");
+    assert.equal((turn?.params as { model: string }).model, "model-assigned");
+    const running = stores.get(bob.id)!.getSession(bobChat.id)!;
+    resumedClient.notify("turn/completed", { threadId: running.threadId, turn: { id: running.activeTurnId, status: "completed" } });
+    assert.equal((await call("owner", `/api/sessions/${aliceChat.id}/settings`, "POST", { model: "model-assigned" })).status, 200);
+    assert.equal((await call("owner", `/api/sessions/${aliceChat.id}/settings`, "POST", { model: "gpt-5.5" })).status, 200);
+    // Changing the assignment takes effect in an already-created chat after runtime restart.
+    assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { chatModel: "gpt-5.5" })).status, 200);
+    assert.equal((await call("bob", `/api/sessions/${bobChat.id}/settings`, "POST", { model: "model-assigned" })).status, 403);
     assert.notEqual(aliceChat.id, bobChat.id);
     const bobChats = (await data(await call("bob", "/api/chats"))).chats;
-    assert.deepEqual(bobChats.map((chat: { id: string }) => chat.id), [bobChat.id]);
+    assert.ok(bobChats.some(chat => chat.id === bobChat.id));
+    assert.ok(bobChats.every(chat => chat.id !== aliceChat.id));
     for (const suffix of ["", "/messages", "/events", "/events/history"]) {
       assert.equal((await call("bob", `/api/sessions/${aliceChat.id}${suffix}`)).status, 404);
     }
@@ -82,6 +120,9 @@ test("gateway isolates users, enforces module rights, and applies revocation to 
     assert.equal((await call("bob", "/api/memory/export")).status, 403);
     assert.equal((await call("bob", "/api/projects", "POST", { path: "course", kind: "learning", create: true })).status, 403);
     assert.equal((await call("bob", `/api/sessions/${bobChat.id}/turns`, "POST", { prompt: "edit", intent: "act" })).status, 403);
+    assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { modules: ["chat", "outline"] })).status, 200);
+    assert.equal((await call("bob", `/api/sessions/${bobChat.id}/turns`, "POST", { prompt: "Создай документ в Outline", intent: "ask" })).status, 202);
+    assert.equal((await call("bob", `/api/sessions/${bobChat.id}/turns`, "POST", { prompt: "Измени файл", intent: "act" })).status, 403);
     assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { modules: ["chat", "learning"] })).status, 200);
     const learningResponse = await call("bob", "/api/projects", "POST", { path: "course", kind: "learning", create: true });
     assert.equal(learningResponse.status, 201);

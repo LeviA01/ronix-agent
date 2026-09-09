@@ -52,6 +52,7 @@ export async function startUserRuntime(user: AccessUser, config: RuntimeConfig):
     PROJECT_ROOTS: owner?.projectRoots.join(",") || join(root, "projects"), CODEX_PATH: "/run/ronix-codex-bin/" + codexPath.split("/").at(-1),
     HOST: "127.0.0.1", RONIX_DEPLOYMENT_MODE: "vds", RONIX_ACCESS_MODE: "reverse-proxy",
     TRUST_PROXY: "true", RONIX_WORKER_SOCKET: socket, RONIX_USER_MODULES: JSON.stringify(user.modules),
+    RONIX_USER_ROLE: user.role, RONIX_CHAT_MODEL: user.chatModel ?? "",
   };
   if (outline && config.outlineApiKey) env.OUTLINE_API_KEY = config.outlineApiKey;
   const args = sandboxArguments(root, appRoot, codexPath);

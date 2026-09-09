@@ -107,7 +107,7 @@ export function handleEvent(event) {
     };
   }
   if (event.type === "approval.requested" || event.type === "approval.resolved") {
-    renderEvents();
+    renderEvents(false);
   } else if (isLiveEvent(event)) {
     scheduleLiveRender();
   } else {
@@ -213,7 +213,10 @@ export function bindEventActions() {
   const eventsEl = $("#events");
   if (!eventsEl) return;
 
-  eventsEl.addEventListener("click", async (event) => {
+  const actionRoot = eventsEl.closest(".chat") ?? eventsEl;
+  actionRoot.addEventListener("click", async (event) => {
+    if (!event.target.closest("#events, #approval-dock")) return;
+    const clickedSessionId = state.sessionId;
     const { setSettingsOpen } = await import("../layout/panels.js");
     setSettingsOpen(false);
     const historyButton = event.target.closest("#load-older");
@@ -225,10 +228,11 @@ export function bindEventActions() {
     const approvalButton = event.target.closest("[data-approval-decision]");
     if (approvalButton) {
       const card = approvalButton.closest("[data-approval-id]");
-      if (!card || !state.sessionId) return;
+      const sessionId = card?.dataset.sessionId;
+      if (!card || !sessionId || sessionId !== clickedSessionId || sessionId !== state.sessionId) return;
       approvalButton.disabled = true;
       try {
-        await api(`/api/sessions/${state.sessionId}/approvals/${card.dataset.approvalId}`, {
+        await api(`/api/sessions/${sessionId}/approvals/${card.dataset.approvalId}`, {
           method: "POST",
           body: JSON.stringify({ decision: approvalButton.dataset.approvalDecision }),
         });
@@ -251,18 +255,19 @@ export function bindEventActions() {
     }, 1200);
   });
 
-  eventsEl.addEventListener("submit", async (event) => {
+  actionRoot.addEventListener("submit", async (event) => {
     const form = event.target.closest(".user-input-form");
     if (!form) return;
     event.preventDefault();
     const card = form.closest("[data-approval-id]");
-    if (!card || !state.sessionId) return;
+    const sessionId = card?.dataset.sessionId;
+    if (!card || !sessionId || sessionId !== state.sessionId) return;
     const button = form.querySelector("[data-user-input-submit]");
     if (button) button.disabled = true;
     try {
       const { collectUserInputAnswers } = await import("./format-event.js");
       const { collectMcpAnswers } = await import("./mcp-form.js");
-      await api(`/api/sessions/${state.sessionId}/approvals/${card.dataset.approvalId}`, {
+      await api(`/api/sessions/${sessionId}/approvals/${card.dataset.approvalId}`, {
         method: "POST",
         body: JSON.stringify({
           decision: "answer",

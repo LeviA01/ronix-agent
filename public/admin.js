@@ -30,6 +30,7 @@ export function mountAccess(root) {
   const search = root.querySelector("input[type=search]");
   const count = root.querySelector(".access-count");
   let users = [];
+  let models = [];
   function notice(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
   function userForm(user) {
     const form = element("form", "access-user");
@@ -47,6 +48,14 @@ export function mountAccess(root) {
     const role = document.createElement("select");
     for (const [value, text] of [["user", "Пользователь"], ["admin", "Администратор"]]) role.add(new Option(text, value, false, user.role === value));
     roleLabel.append(role);
+    const modelLabel = element("label", "access-role", "Модель чата (для пользователя)");
+    const model = document.createElement("select");
+    model.add(new Option("По умолчанию сервиса", "", false, !user.chatModel));
+    for (const item of models) model.add(new Option(item.displayName, item.model, false, user.chatModel === item.model));
+    if (user.chatModel && !models.some(item => item.model === user.chatModel)) {
+      model.add(new Option(`${user.chatModel} (недоступна)`, user.chatModel, true, true));
+    }
+    modelLabel.append(model, element("small", "", "Администратор выбирает модель своих чатов самостоятельно."));
     const enabled = checkbox("Аккаунт включён", !user.disabled, "enabled");
     const modules = element("fieldset", "access-modules");
     modules.append(element("legend", "", "Доступные модули"));
@@ -56,10 +65,10 @@ export function mountAccess(root) {
     const footer = element("div", "access-user-footer");
     const feedback = element("span", "access-feedback"); feedback.setAttribute("role", "status");
     const save = element("button", "access-save", "Сохранить"); save.type = "submit"; save.disabled = true;
-    const payload = () => ({ role: role.value, disabled: !enabled.querySelector("input").checked, modules: [...modules.querySelectorAll("input:checked")].map(input => input.value) });
+    const payload = () => ({ role: role.value, chatModel: model.value || null, disabled: !enabled.querySelector("input").checked, modules: [...modules.querySelectorAll("input:checked")].map(input => input.value) });
     let saved = JSON.stringify(payload());
     form.addEventListener("change", () => { save.disabled = saved === JSON.stringify(payload()); feedback.textContent = save.disabled ? "" : "Есть изменения"; feedback.dataset.error = "false"; });
-    footer.append(feedback, save); controls.append(roleLabel, enabled, modules); form.append(identity, controls, footer);
+    footer.append(feedback, save); controls.append(roleLabel, modelLabel, enabled, modules); form.append(identity, controls, footer);
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const data = payload();
@@ -83,7 +92,12 @@ export function mountAccess(root) {
   search.addEventListener("input", filter);
   async function load() {
     notice("Загрузка пользователей…"); list.setAttribute("aria-busy", "true");
-    try { ({ users } = await api("/api/admin/users")); list.replaceChildren(...users.map(userForm)); filter(); }
+    try {
+      const [userData, modelData] = await Promise.all([api("/api/admin/users"), api("/api/codex/models").catch(() => null)]);
+      users = userData.users; models = modelData?.models ?? [];
+      list.replaceChildren(...users.map(userForm)); filter();
+      if (!modelData) notice("Список моделей недоступен. Текущие назначения сохранены; обновите страницу для выбора другой модели.", true);
+    }
     catch (error) { notice(error.message, true); const retry = element("button", "access-retry", "Повторить"); retry.type = "button"; retry.onclick = () => void load(); status.append(retry); }
     finally { list.setAttribute("aria-busy", "false"); }
   }

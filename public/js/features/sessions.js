@@ -110,7 +110,7 @@ export function renderSessionMeta(session) {
   $("#send").disabled = materialMode || session.status === "running" || session.status === "stopped";
   $("#prompt-form").hidden = materialMode;
   $("#prompt").placeholder = chatSession
-    ? "Спросите Ronix или выберите Act для работы в проекте…"
+    ? "Напишите вопрос или задачу…"
     : learning
     ? session.purpose === "practice"
       ? "Отправьте код или вопрос по практике…"

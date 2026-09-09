@@ -16,8 +16,9 @@ export type AccessUser = {
   disabled: boolean;
   modules: UserModule[];
   revision: number;
+  chatModel: string | null;
 };
-export type UserAccess = { modules: readonly UserModule[] };
+export type UserAccess = { modules: readonly UserModule[]; role?: "admin" | "user"; chatModel?: string | null };
 
 export function requireModule(access: UserAccess | undefined, module: UserModule): void {
   if (access && !access.modules.includes(module)) throw new HttpError(403, "Нет доступа к модулю: " + module);
@@ -61,6 +62,9 @@ export class AccessStore {
         revision INTEGER NOT NULL DEFAULT 1
       );
     `);
+    if (!this.db.prepare("PRAGMA table_info(users)").all().some(row => row.name === "chat_model")) {
+      this.db.exec("ALTER TABLE users ADD COLUMN chat_model TEXT");
+    }
   }
   identify(identity: { subject: string; username: string; name: string }): AccessUser {
     const existing = this.db.prepare("SELECT id FROM users WHERE subject = ?").get(identity.subject);
@@ -83,11 +87,15 @@ export class AccessStore {
     if (!row) throw new HttpError(404, "Пользователь не найден");
     return this.decode(row);
   }
-  update(id: string, input: { role?: unknown; disabled?: unknown; modules?: unknown }): AccessUser {
+  update(id: string, input: { role?: unknown; disabled?: unknown; modules?: unknown; chatModel?: unknown }): AccessUser {
     const current = this.get(id);
     const role = input.role ?? current.role;
     const disabled = input.disabled ?? current.disabled;
     const modules = input.modules ?? current.modules;
+    const chatModel = input.chatModel === undefined ? current.chatModel : input.chatModel;
+    if (chatModel !== null && (typeof chatModel !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,199}$/.test(chatModel))) {
+      throw new HttpError(400, "Некорректная модель чата");
+    }
     if ((role !== "admin" && role !== "user") || typeof disabled !== "boolean"
       || !Array.isArray(modules) || modules.some(value => !USER_MODULES.includes(value))) {
       throw new HttpError(400, "Некорректные права пользователя");
@@ -96,14 +104,15 @@ export class AccessStore {
       const row = this.db.prepare("SELECT count(*) AS count FROM users WHERE role='admin' AND disabled=0").get()!;
       if (Number(row.count) <= 1) throw new HttpError(409, "Нельзя отключить последнего администратора");
     }
-    this.db.prepare("UPDATE users SET role=?, disabled=?, modules=?, revision=revision+1 WHERE id=?")
-      .run(role, disabled ? 1 : 0, JSON.stringify([...new Set(modules)]), id);
+    this.db.prepare("UPDATE users SET role=?, disabled=?, modules=?, chat_model=?, revision=revision+1 WHERE id=?")
+      .run(role, disabled ? 1 : 0, JSON.stringify([...new Set(modules)]), chatModel, id);
     return this.get(id);
   }
   close(): void { this.db.close(); }
   private decode(row: Record<string, unknown>): AccessUser {
     return { id: String(row.id), subject: String(row.subject), username: String(row.username),
       name: String(row.name), role: row.role as AccessUser["role"], disabled: Boolean(row.disabled),
-      modules: JSON.parse(String(row.modules)) as UserModule[], revision: Number(row.revision) };
+      modules: JSON.parse(String(row.modules)) as UserModule[], revision: Number(row.revision),
+      chatModel: row.chat_model == null ? null : String(row.chat_model) };
   }
 }

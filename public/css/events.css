@@ -135,6 +135,54 @@
   background: color-mix(in srgb, var(--attention) 10%, var(--panel));
 }
 
+.approval-dock {
+  width: min(880px, calc(100% - 32px));
+  min-width: 0;
+  margin: 8px auto 12px;
+  border: 1px solid var(--attention);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.approval-dock[hidden] { display: none; }
+.approval-dock-status {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--attention) 16%, var(--panel));
+  font-size: 13px;
+  font-weight: 650;
+}
+.approval-dock-cards {
+  max-height: min(40dvh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.approval-dock .approval-card {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  box-shadow: none;
+  animation: none;
+  overflow-wrap: anywhere;
+}
+.approval-dock .approval-card + .approval-card { border-top: 1px solid var(--border); }
+.approval-dock .approval-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 8px 0;
+  background: var(--panel);
+}
+.approval-dock .approval-actions button { min-height: 44px; }
+.approval-dock [data-user-input-submit],
+.approval-dock [data-approval-decision="accept"] {
+  background: var(--accent);
+  color: var(--accent-ink, var(--bg));
+  border-color: var(--accent);
+  font-weight: 650;
+}
+
 .approval-card pre {
   margin: 10px 0;
   white-space: pre-wrap;

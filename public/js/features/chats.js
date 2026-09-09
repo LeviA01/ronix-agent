@@ -1,4 +1,5 @@
 import { state } from "../core/state.js";
+import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { sessionViewToken } from "../core/session-view.js";
@@ -82,7 +83,7 @@ async function saveChatProjects() {
 }
 
 export function setChatIntent(intent) {
-  state.chatIntent = intent === "act" ? "act" : "ask";
+  state.chatIntent = intent === "act" && hasModule("development") ? "act" : "ask";
   if (state.chatIntent === "ask") state.chatActionProjectId = null;
   renderChatIntentControls();
 }
@@ -92,7 +93,9 @@ export function renderChatIntentControls() {
   const controls = $("#chat-composer-controls");
   controls.hidden = !chat;
   if (!chat) return;
+  if (!hasModule("development")) state.chatIntent = "ask";
   controls.querySelectorAll("[data-chat-intent]").forEach((button) => {
+    button.hidden = button.dataset.chatIntent === "act" && !hasModule("development");
     button.classList.toggle("active", button.dataset.chatIntent === state.chatIntent);
   });
   const attached = state.projects.filter((project) => (chat.projectIds ?? []).includes(project.id));
@@ -107,7 +110,9 @@ export function renderChatIntentControls() {
   $("#chat-action-project-label").hidden = state.chatIntent !== "act";
   $("#chat-intent-hint").textContent = state.chatIntent === "act"
     ? attached.length ? "Codex может изменить выбранный проект" : "Подключите проект в боковой панели"
-    : "Ответ без изменения файлов";
+    : hasModule("outline")
+      ? "Можно создавать и редактировать документы Outline по вашему запросу. Файлы — только чтение."
+      : "Файлы — только чтение";
 }
 
 export function bindChats() {

@@ -309,6 +309,10 @@
                 </section>
 
                 <div id="composer-shell" class="composer-shell">
+                    <section id="approval-dock" class="approval-dock" aria-label="Ожидающие подтверждения" hidden>
+                        <p id="approval-dock-status" class="approval-dock-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                        <div id="approval-dock-cards" class="approval-dock-cards"></div>
+                    </section>
                     <div
                         id="theory-suggestions"
                         class="theory-suggestions"
@@ -317,8 +321,8 @@
                     ></div>
                     <div id="chat-composer-controls" class="chat-composer-controls" hidden>
                         <div class="intent-switch" role="group" aria-label="Режим сообщения">
-                            <button type="button" data-chat-intent="ask" class="active">Ask</button>
-                            <button type="button" data-chat-intent="act">Act</button>
+                            <button type="button" data-chat-intent="ask" class="active">Чат</button>
+                            <button type="button" data-chat-intent="act">Изменить файлы</button>
                         </div>
                         <label id="chat-action-project-label" hidden>
                             <span>Выполнить в</span>

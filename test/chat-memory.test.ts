@@ -76,3 +76,33 @@ test("chat defaults to read-only Ask, gates Act by attached project, and archive
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("Outline create and edit requests stay in chat without enabling file writes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ronix-outline-chat-"));
+  const store = new Store(directory);
+  const codex = new FakeAppServer();
+  const manager = new SessionManager(store, codex, 100, undefined, directory);
+  try {
+    const chat = manager.createSession(null);
+    for (const prompt of ["Создай документ в Outline", "Обнови этот документ в Outline"]) {
+      await manager.startTurn(chat.id, prompt);
+      const thread = codex.calls.findLast(call => call.method === "thread/start" || call.method === "thread/resume");
+      assert.equal((thread?.params as { sandbox: string }).sandbox, "read-only");
+      const turn = codex.calls.findLast(call => call.method === "turn/start");
+      const input = (turn?.params as { input: Array<{ text: string }> }).input[0]?.text ?? "";
+      assert.match(input, /создавай и редактируй документы через доступные инструменты Outline MCP, в том числе в Ask/);
+      assert.ok(input.endsWith(prompt));
+      const session = store.getSession(chat.id)!;
+      codex.serverRequest("outline-confirm", "mcpServer/elicitation/request", {
+        threadId: session.threadId, turnId: session.activeTurnId, serverName: "outline",
+        mode: "form", message: "Подтвердите изменение документа",
+        requestedSchema: { type: "object", properties: {} },
+      });
+      assert.equal(manager.listApprovals(chat.id).length, 1);
+      manager.respondToApproval(chat.id, "outline-confirm", "accept");
+      assert.deepEqual(codex.responses.at(-1)?.result, { action: "accept", content: {}, _meta: null });
+      codex.notify("turn/completed", { threadId: session.threadId, turn: { id: session.activeTurnId, status: "completed" } });
+    }
+    await assert.rejects(manager.startTurn(chat.id, "Измени файл", { intent: "act" }), /requires a target project/);
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
