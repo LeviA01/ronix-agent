@@ -2,11 +2,14 @@ import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml, pluralRu, uniqueStrings } from "../core/format.js";
-import { selectedProject, isLearningProject } from "./context.js";
+import { currentProjectId, selectedProject, isLearningProject } from "./context.js";
 import { setGitOpen } from "../layout/panels.js";
 import { setPromptValue } from "./composer.js";
 
+let statusRequest = 0;
+
 export function resetGitStatus() {
+  statusRequest++;
   state.gitStatus = null;
   state.gitProjectId = null;
   state.gitLoading = false;
@@ -16,27 +19,28 @@ export function resetGitStatus() {
   renderGitPanel();
 }
 
-export async function refreshGitStatus(projectId = $("#project")?.value) {
+export async function refreshGitStatus(projectId = currentProjectId()) {
   if (!projectId) return null;
+  const request = ++statusRequest;
   state.gitProjectId = projectId;
   state.gitLoading = true;
   state.gitError = null;
   renderGitPanel();
   try {
     const status = await api(`/api/projects/${encodeURIComponent(projectId)}/git/status`);
-    if (state.gitProjectId === projectId) {
+    if (request === statusRequest && state.gitProjectId === projectId) {
       state.gitStatus = status;
       state.gitError = null;
     }
     return status;
   } catch (error) {
-    if (state.gitProjectId === projectId) {
+    if (request === statusRequest && state.gitProjectId === projectId) {
       state.gitStatus = null;
       state.gitError = error.message;
     }
     return null;
   } finally {
-    if (state.gitProjectId === projectId) {
+    if (request === statusRequest && state.gitProjectId === projectId) {
       state.gitLoading = false;
       renderGitPanel();
     }

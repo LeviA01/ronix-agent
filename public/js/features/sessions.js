@@ -1,11 +1,12 @@
 import { state } from "../core/state.js";
+import { isProjectSurface } from "../core/navigation.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { storeJson } from "../core/storage.js";
 import { rememberSessionView, restoreSessionView, invalidateSessionView, sessionViewToken, forgetSessionView } from "../core/session-view.js";
 import { escapeHtml, relativeTime, sessionTitle, statusLabel } from "../core/format.js";
 import { getChat, setGitOpen, setSettingsOpen, setSidebarOpen } from "../layout/panels.js";
-import { isLearningProject } from "./context.js";
+import { currentProjectId, isLearningProject } from "./context.js";
 import {
   forgetSession,
   normalizeSessionModel,
@@ -47,6 +48,12 @@ export function resetProjectSessionView() {
   state.sessionRefreshTimer = null;
   state.liveRenderFrame = null;
   state.sessions = [];
+  state.learning = null;
+  state.theoryMaterials = null;
+  state.theoryMaterialDetail = null;
+  state.theoryMaterialAnswers = {};
+  state.theoryMaterialResult = null;
+  state.materialGeneration = null;
   state.sessionId = null;
   state.events = [];
   state.lastSequence = 0;
@@ -73,11 +80,14 @@ export function renderSessionMeta(session) {
   renderTheorySuggestions();
   const meta = $("#session-meta");
   if (!session) {
-    const project = state.surface === "projects"
-      ? state.projects.find((item) => item.id === $("#project").value)
+    $("#chat-context-trigger").hidden = true;
+    const project = isProjectSurface(state.surface)
+      ? state.projects.find((item) => item.id === currentProjectId())
       : null;
     const hasSessions = state.sessions.length > 0;
-    $("#session-title").textContent = project?.name ?? "Выберите проект";
+    $("#session-title").textContent = !project ? "Начало работы"
+      : state.surface === "learning" ? "Выберите режим"
+      : hasSessions ? "Выберите сессию" : "Новая сессия";
     meta.className = "session-meta";
     meta.innerHTML = `
       <span class="session-meta-dot"></span>
@@ -101,7 +111,7 @@ export function renderSessionMeta(session) {
   $("#session-title").textContent = session.purpose === "materials" ? "Теория" : sessionTitle(session);
   meta.className = `session-meta ${session.status}`;
   const thread = session.threadId ? ` · ${session.threadId.slice(0, 8)}` : "";
-  const learning = state.surface === "projects" && isLearningProject();
+  const learning = isProjectSurface(state.surface) && isLearningProject();
   meta.innerHTML = `
     <span class="session-meta-dot"></span>
     <span>${escapeHtml(statusLabel(session.status) + (learning ? "" : thread))}</span>
@@ -142,19 +152,19 @@ export function renderSessionMeta(session) {
 }
 
 export function renderSessions() {
-  const learning = state.surface === "projects" && isLearningProject();
-  $("#session-search-wrap").hidden = learning || state.surface === "memory";
+  const learning = isProjectSurface(state.surface) && isLearningProject();
+  $("#session-search-wrap").hidden = state.surface === "learning" || state.surface === "memory";
   $("#session-search-empty").hidden = true;
   getChat()?.classList.remove("learning-project");
-  $("#sessions-label").textContent = state.surface === "chat" ? "Чаты" : learning ? "Учёба" : "Сессии";
+  $("#sessions-label").textContent = state.surface === "chat" ? "Чаты" : state.surface === "learning" ? "Учёба" : "Сессии";
   $("#session-count").textContent = learning ? "4" : String(state.sessions.length);
-  $("#new-session").hidden = learning || state.surface !== "projects";
+  $("#new-session").hidden = state.surface !== "development" || !currentProjectId();
   if (learning) {
     $("#sessions").innerHTML = `
       ${renderLearningModeButton("course", "Курс", "Теория, объяснения и движение по ROADMAP")}
       ${renderLearningModeButton("theory", "Теория", "Разбор пробелов без написания кода")}
       ${renderLearningModeButton("practice", "Практика", "Сдача кода сообщением, ревью и дневник")}
-      ${renderLearningModeButton("progress", "Успехи", "Дневник и дорожная карта только для чтения")}
+      ${renderLearningModeButton("progress", "Прогресс", "Дневник и дорожная карта только для чтения")}
     `;
     document.querySelectorAll("[data-learning-mode]").forEach((button) => {
       button.addEventListener("click", () => void selectLearningMode(button.dataset.learningMode));
@@ -277,8 +287,8 @@ export async function selectSession(id) {
   state.liveResponse = null;
   state.selectedSession = null;
   state.archivedMessages = [];
-  const projectId = $("#project").value;
-  if (state.surface === "projects" && projectId) rememberSession(projectId, id);
+  const projectId = currentProjectId();
+  if (isProjectSurface(state.surface) && projectId) rememberSession(projectId, id);
   if (state.surface === "chat") {
     state.navigation.chatId = id;
     storeJson("ronix-agent-navigation", state.navigation);
@@ -408,7 +418,7 @@ export async function loadSessions() {
     return;
   }
   if (state.surface === "memory") return;
-  const projectId = $("#project").value;
+  const projectId = currentProjectId();
   const project = state.projects.find((item) => item.id === projectId) ?? null;
   if (!projectId) {
     state.sessions = [];
@@ -421,7 +431,7 @@ export async function loadSessions() {
   }
   if (project?.kind === "learning") {
     await loadLearning(projectId);
-    if (!isCurrent() || state.surface !== "projects" || $("#project").value !== projectId) return;
+    if (!isCurrent() || !isProjectSurface(state.surface) || currentProjectId() !== projectId) return;
     state.sessions = [
       state.learning?.sessions?.course,
       state.learning?.sessions?.theory,
@@ -457,7 +467,7 @@ export async function loadSessions() {
   }
   state.learning = null;
   const { sessions } = await api(`/api/sessions?projectId=${encodeURIComponent(projectId)}`);
-  if (!isCurrent() || state.surface !== "projects" || $("#project").value !== projectId) return;
+  if (!isCurrent() || !isProjectSurface(state.surface) || currentProjectId() !== projectId) return;
   state.sessions = sessions;
   renderSessions();
   if (state.gitProjectId !== projectId && !state.gitLoading) void refreshGitStatus(projectId);
@@ -478,15 +488,18 @@ export async function loadSessions() {
 }
 
 export async function createSession() {
-  const projectId = $("#project").value;
-  if (!projectId) return;
+  const projectId = currentProjectId();
+  if (state.surface !== "development" || !projectId) return;
+  const isCurrent = sessionViewToken();
   try {
     const { session } = await api("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ projectId, ...preferredModelSettings() }),
     });
+    if (!isCurrent()) return;
     await loadSessions();
-    if (state.sessionId !== session.id) await selectSession(session.id);
+    if (state.surface === "development" && currentProjectId() === projectId
+      && state.sessionId !== session.id) await selectSession(session.id);
   } catch (error) {
     alert(error.message);
   }

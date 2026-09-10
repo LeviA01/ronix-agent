@@ -1,17 +1,21 @@
 import { state } from "../core/state.js";
+import { isProjectSurface } from "../core/navigation.js";
 import { storeJson } from "../core/storage.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml, effortLabel } from "../core/format.js";
 
 export function rememberProject(projectId) {
+  if (!isProjectSurface(state.surface)) return;
   state.navigation.projectId = projectId;
+  state.navigation.projectsBySurface ??= {};
+  state.navigation.projectsBySurface[state.surface] = projectId;
   state.navigation.sessionsByProject ??= {};
   storeJson("ronix-agent-navigation", state.navigation);
 }
 
 export function rememberSession(projectId, sessionId) {
-  state.navigation.projectId = projectId;
+  rememberProject(projectId);
   state.navigation.sessionsByProject ??= {};
   state.navigation.sessionsByProject[projectId] = sessionId;
   storeJson("ronix-agent-navigation", state.navigation);

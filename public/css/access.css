@@ -1,7 +1,6 @@
 body[data-allow-development="false"] #toggle-git,
 body[data-allow-development="false"] #new-session,
 body[data-allow-development="false"] [data-chat-intent="act"],
-body[data-allow-learning="false"] .project-kind-option,
 body[data-admin="false"] #show-limits { display:none !important; }
 body[data-allow-learning="false"] [data-project-learning] { display: none !important; }
 

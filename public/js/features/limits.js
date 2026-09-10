@@ -2,12 +2,13 @@ import { $ , $$ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml, formatTokens, resetLabel, windowLabel } from "../core/format.js";
 import { setSidebarOpen } from "../layout/panels.js";
+import { openDialog, closeDialog, utilityReturnTarget } from "../layout/dialogs.js";
 
 const limitsModal = () => $("#limits-modal");
 
 export function closeLimits() {
   const modal = limitsModal();
-  if (modal) modal.hidden = true;
+  if (modal) closeDialog(modal);
 }
 
 function renderLimitWindow(window) {
@@ -78,7 +79,7 @@ async function loadLimits(force = false) {
 export function bindLimits() {
   $("#show-limits")?.addEventListener("click", () => {
     setSidebarOpen(false);
-    limitsModal().hidden = false;
+    openDialog(limitsModal(), { returnFocus: utilityReturnTarget });
     void loadLimits();
   });
   $$("[data-close-limits]").forEach((button) => {

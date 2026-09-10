@@ -6,6 +6,7 @@ import { storeString } from "./core/storage.js";
 import { applyTheme, bindThemeControls } from "./layout/theme.js";
 import { bindLayoutControls, setSettingsOpen } from "./layout/panels.js";
 import { setConnection } from "./features/context.js";
+import { bindRonixMenu } from "./features/ronix-menu.js";
 import { closeLimits, bindLimits } from "./features/limits.js";
 import { closeSettings, bindSettings } from "./features/settings.js";
 import { closeCreateProject, bindProjects, loadProjects } from "./features/projects.js";
@@ -35,6 +36,7 @@ export async function bootstrap() {
   bindChats();
   bindMemory();
   bindSurfaces();
+  bindRonixMenu();
   bindEventActions();
 
   $("#show-technical").checked = state.showTechnical;
@@ -113,7 +115,10 @@ export async function bootstrap() {
   fetch("/api/auth/status")
     .then((response) => response.ok ? response.json() : null)
     .then((status) => {
-      if (status?.enabled) $("#logout").hidden = false;
+      if (status?.enabled) {
+        $("#logout").hidden = false;
+        $("#logout-separator").hidden = false;
+      }
     })
     .catch(() => {});
 
@@ -131,7 +136,7 @@ export async function bootstrap() {
 
   try {
     await loadModels();
-    await loadProjects();
+    await loadProjects({ refreshSessions: false });
     await setSurface(state.surface);
     renderEvents();
     setConnection("ready");

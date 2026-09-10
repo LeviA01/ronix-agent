@@ -1,3 +1,4 @@
+import { currentProjectId } from "./context.js";
 import { state } from "../core/state.js";
 import { hasModule } from "../core/access.js";
 import { $ } from "../core/dom.js";
@@ -6,13 +7,17 @@ import { loadSessions, resetProjectSessionView, selectSession } from "./sessions
 import { hasSessionView } from "../core/session-view.js";
 import { loadChats } from "./chats.js";
 import { loadMemory } from "./memory.js";
+import { bindPopover, closePopovers } from "../layout/popovers.js";
 import { setSidebarOpen } from "../layout/panels.js";
 import { renderEvents } from "../events/render.js";
+import { SURFACES, availableSurface as canAccessSurface, resolveSurface } from "../core/navigation.js";
+import { renderProjectPicker } from "./projects.js";
+import { saveCurrentDraft } from "./composer.js";
 
-const SURFACES = new Set(["projects", "chat", "memory"]);
-const SURFACE_LABELS = { projects: "Проекты", chat: "Чат", memory: "Память" };
+const SURFACE_LABELS = { learning: "Учёба", development: "Разработка", chat: "Чат", memory: "Память" };
 const SURFACE_DETAILS = {
-  projects: { description: "Сессии и работа с кодом", path: 'M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3Z' },
+  learning: { description: "Курс, теория, практика и прогресс", path: 'M12 5C9 3 5 3 3 4v15c3-1 6-1 9 1m0-15c3-2 7-2 9-1v15c-3-1-6-1-9 1Zm0 0v15' },
+  development: { description: "Сессии и работа с кодом", path: 'M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3Z' },
   chat: { description: "Вопросы и обсуждения", path: 'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2ZM7 9h10M7 13h6' },
   memory: { description: "Решения, факты и знания", path: 'm12 3 9 5-9 5-9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5' },
 };
@@ -22,18 +27,13 @@ function surfaceIcon(value) {
 }
 
 function availableSurface(value) {
-  return value === "chat" ? hasModule("chat") : value === "memory"
-    ? hasModule("development") : hasModule("development") || hasModule("learning");
+  return canAccessSurface(value, hasModule);
 }
 
-function closeSurfaceMenu(restoreFocus = false) {
-  $("#surface-menu").hidden = true;
-  $("#surface-trigger").setAttribute("aria-expanded", "false");
-  if (restoreFocus) $("#surface-trigger").focus();
-}
+let surfaceMenu;
 
 function renderSurfaceMenu() {
-  closeSurfaceMenu();
+  surfaceMenu?.close();
   const values = [...SURFACES].filter(availableSurface);
   const current = values.includes(state.surface) ? state.surface : values[0];
   $("#surface-trigger").disabled = !current;
@@ -41,7 +41,7 @@ function renderSurfaceMenu() {
   $("#surface-current-icon").innerHTML = current ? surfaceIcon(current) : "";
   $("#surface-menu").innerHTML = values.map((value) => `
     <button type="button" class="surface-option" data-surface="${value}"
-      role="menuitemradio" aria-checked="${value === current}" tabindex="-1">
+      data-popover-item role="menuitemradio" aria-checked="${value === current}" tabindex="-1">
       <span class="surface-icon">${surfaceIcon(value)}</span>
       <span class="surface-option-text"><strong>${SURFACE_LABELS[value]}</strong><small>${SURFACE_DETAILS[value].description}</small></span>
       <svg class="surface-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>
@@ -49,25 +49,20 @@ function renderSurfaceMenu() {
   `).join("");
 }
 
-function openSurfaceMenu(last = false) {
-  const menu = $("#surface-menu");
-  const items = [...menu.querySelectorAll("[data-surface]")];
-  if (!items.length) return;
-  menu.hidden = false;
-  $("#surface-trigger").setAttribute("aria-expanded", "true");
-  const selected = menu.querySelector('[aria-checked="true"]');
-  (last ? items.at(-1) : selected ?? items[0]).focus();
-}
-
 export async function setSurface(surface) {
-  const next = SURFACES.has(surface) && availableSurface(surface) ? surface : [...SURFACES].find(availableSurface) ?? "chat";
-  if (state.surface !== next || next === "memory") resetProjectSessionView();
+  closePopovers();
+  const next = resolveSurface(surface, state.projects, state.navigation, hasModule);
+  if (state.surface !== next || next === "memory") {
+    saveCurrentDraft();
+    resetProjectSessionView();
+  }
   state.surface = next;
+  renderProjectPicker();
   storeString("ronix-agent-surface", next);
   renderSurfaceMenu();
 
-  $("#project-navigation").hidden = next !== "projects";
-  $("#chat-projects-editor").hidden = next !== "chat";
+  $("#chat-context-trigger").hidden = true;
+  $("#new-session").hidden = next !== "development" || !currentProjectId();
   $("#sessions-label").parentElement.hidden = next === "memory";
   $("#sessions").hidden = next === "memory";
   $("#session-search").value = "";
@@ -82,7 +77,7 @@ export async function setSurface(surface) {
   if (next !== "memory" && !state.historyReady) renderEvents();
 
   const cachedId = next === "chat" ? state.navigation.chatId
-    : next === "projects" ? state.navigation.sessionsByProject?.[$("#project").value] : null;
+    : next === "development" ? state.navigation.sessionsByProject?.[currentProjectId()] : null;
   const restoring = cachedId && cachedId !== state.sessionId && hasSessionView(cachedId)
     ? selectSession(cachedId) : null;
 
@@ -104,50 +99,13 @@ export async function setSurface(surface) {
 
 export function bindSurfaces() {
   renderSurfaceMenu();
-  const navigation = $(".surface-navigation");
-  const trigger = $("#surface-trigger");
-  const menu = $("#surface-menu");
-  trigger.addEventListener("click", () => {
-    if (menu.hidden) openSurfaceMenu();
-    else closeSurfaceMenu(true);
-  });
-  trigger.addEventListener("keydown", (event) => {
-    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    openSurfaceMenu(event.key === "ArrowUp");
-  });
-  menu.addEventListener("click", (event) => {
+  surfaceMenu = bindPopover($("#surface-trigger"), $("#surface-menu"));
+  $("#surface-menu").addEventListener("click", (event) => {
     const option = event.target.closest("[data-surface]");
     if (!option) return;
-    closeSurfaceMenu(true);
+    surfaceMenu.close(true);
     setSidebarOpen(false);
     if (window.matchMedia("(max-width: 760px)").matches) $("#open-sidebar").focus();
-    void setSurface(option.dataset.surface);
-  });
-  navigation.addEventListener("keydown", (event) => {
-    if (menu.hidden) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeSurfaceMenu(true);
-      return;
-    }
-    const items = [...menu.querySelectorAll("[data-surface]")];
-    const index = items.indexOf(document.activeElement);
-    let next;
-    if (event.key === "ArrowDown") next = (index + 1) % items.length;
-    if (event.key === "ArrowUp") next = (index - 1 + items.length) % items.length;
-    if (event.key === "Home") next = 0;
-    if (event.key === "End") next = items.length - 1;
-    if (next === undefined) return;
-    event.preventDefault();
-    items[next].focus();
-  });
-  navigation.addEventListener("focusout", (event) => {
-    if (!navigation.contains(event.relatedTarget)) closeSurfaceMenu();
-  });
-  document.addEventListener("pointerdown", (event) => {
-    if (!navigation.contains(event.target)) closeSurfaceMenu();
+    void setSurface(option.dataset.surface).catch((error) => alert(error.message));
   });
 }

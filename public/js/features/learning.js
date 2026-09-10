@@ -1,3 +1,4 @@
+import { currentProjectId } from "./context.js";
 import { state } from "../core/state.js";
 import { $ } from "../core/dom.js";
 import { api } from "../core/api.js";
@@ -8,7 +9,7 @@ import { clearPrompt, saveCurrentDraft, setPromptValue } from "./composer.js";
 import { renderGitPanel } from "./git.js";
 import { rememberSessionView, invalidateSessionView, sessionViewToken } from "../core/session-view.js";
 
-export async function loadLearning(projectId = $("#project")?.value) {
+export async function loadLearning(projectId = currentProjectId()) {
   const isCurrent = sessionViewToken();
   if (!projectId) {
     state.learning = null;
@@ -16,7 +17,7 @@ export async function loadLearning(projectId = $("#project")?.value) {
   }
   try {
     const learning = await api(`/api/projects/${encodeURIComponent(projectId)}/learning`);
-    if (!isCurrent() || $("#project")?.value !== projectId) return null;
+    if (!isCurrent() || currentProjectId() !== projectId) return null;
     state.learning = learning;
     return state.learning;
   } catch (error) {
@@ -110,7 +111,7 @@ export async function selectTheoryTab(tab) {
   if (tab === "materials") await loadTheoryMaterials();
 }
 
-export async function loadTheoryMaterials(projectId = $("#project")?.value) {
+export async function loadTheoryMaterials(projectId = currentProjectId()) {
   if (!projectId) return null;
   try {
     state.theoryMaterials = await api(
@@ -267,7 +268,7 @@ function suggestedMaterialTopic() {
 }
 
 export async function openTheoryMaterial(materialId) {
-  const projectId = $("#project")?.value;
+  const projectId = currentProjectId();
   if (!projectId || !materialId) return;
   try {
     const detail = await api(
@@ -685,7 +686,7 @@ function rerenderMaterials() {
 }
 
 async function generateTheoryMaterial(formData) {
-  const projectId = $("#project")?.value;
+  const projectId = currentProjectId();
   if (!projectId) return;
   const topicMode = formData.get("topicMode") === "auto" ? "auto" : "manual";
   state.materialGeneration = { status: "running", topicMode };
@@ -711,7 +712,7 @@ async function generateTheoryMaterial(formData) {
 }
 
 async function removeTheoryMaterial(materialId) {
-  const projectId = $("#project")?.value;
+  const projectId = currentProjectId();
   const material = state.theoryMaterials?.materials?.find((item) => item.id === materialId);
   if (!projectId || !materialId) return;
   if (!confirm(`Удалить материал «${material?.title || materialId}» и его сохранённый результат?`)) return;
@@ -739,7 +740,7 @@ function moveOrderItem(blockId, itemId, direction, restoreFocus = false) {
 }
 
 async function submitMaterialAttempt(revision) {
-  const projectId = $("#project")?.value;
+  const projectId = currentProjectId();
   const materialId = state.theoryMaterialDetail?.material?.id;
   if (!projectId || !materialId || !revision) return;
   try {

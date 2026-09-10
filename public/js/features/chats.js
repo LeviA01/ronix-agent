@@ -6,6 +6,10 @@ import { sessionViewToken } from "../core/session-view.js";
 import { escapeHtml } from "../core/format.js";
 import { preferredModelSettings } from "./models.js";
 import { renderSessions, selectSession } from "./sessions.js";
+import { bindPopover } from "../layout/popovers.js";
+
+const contextWrites = new Map();
+let contextMenu;
 
 export async function loadChats() {
   const isCurrent = sessionViewToken();
@@ -45,40 +49,88 @@ export async function createChat() {
   }
 }
 
-export function renderChatProjectEditor(chat = state.selectedSession) {
-  if (state.surface !== "chat") return;
-  const selected = new Set(chat?.projectIds ?? []);
-  $("#chat-project-options").innerHTML = state.projects.length
-    ? state.projects.map((project) => `
-        <label>
-          <input type="checkbox" value="${escapeHtml(project.id)}" ${selected.has(project.id) ? "checked" : ""} />
-          <span>${escapeHtml(project.name)}</span>
-          ${project.kind === "learning" ? "<small>учёба</small>" : ""}
-        </label>
-      `).join("")
-    : '<p class="chat-projects-empty">Нет зарегистрированных проектов.</p>';
-  $("#chat-project-options").querySelectorAll("input").forEach((input) => {
-    input.addEventListener("change", () => void saveChatProjects());
+function filterChatProjects() {
+  const query = $("#chat-project-search").value.trim().toLocaleLowerCase("ru");
+  let visible = 0;
+  $("#chat-project-options").querySelectorAll("label").forEach((label) => {
+    label.hidden = !label.textContent.toLocaleLowerCase("ru").includes(query);
+    if (!label.hidden) visible++;
   });
+  $("#chat-project-empty").hidden = visible > 0;
+  $("#chat-project-empty").textContent = state.projects.length ? "Проекты не найдены" : "Нет зарегистрированных проектов.";
+}
+
+export function renderChatProjectEditor(chat = state.selectedSession) {
+  const active = state.surface === "chat" && chat?.id === state.sessionId;
+  $("#chat-context-trigger").hidden = !active;
+  if (!active) { contextMenu?.close(); return; }
+  const panel = $("#chat-projects-editor");
+  if (panel.dataset.chatId !== chat.id) {
+    contextMenu?.close();
+    panel.dataset.chatId = chat.id;
+    $("#chat-project-search").value = "";
+    $("#chat-project-status").hidden = true;
+  }
+  const pending = contextWrites.get(chat.id);
+  const selected = new Set(pending?.projectIds ?? chat.projectIds ?? []);
+  const options = $("#chat-project-options");
+  const signature = JSON.stringify(state.projects.map(({ id, name, kind }) => [id, name, kind]));
+  // Keep the same checkbox nodes so saving never loses keyboard focus.
+  if (options.dataset.projects !== signature) {
+    options.dataset.projects = signature;
+    options.innerHTML = state.projects.map((project) => `
+      <label>
+        <input type="checkbox" data-popover-item value="${escapeHtml(project.id)}" />
+        <span>${escapeHtml(project.name)}</span>
+        ${project.kind === "learning" ? "<small>учёба</small>" : ""}
+      </label>
+    `).join("");
+  }
+  options.querySelectorAll("input").forEach((input) => { input.checked = selected.has(input.value); });
+  $("#chat-context-label").textContent = `Контекст · ${state.projects.filter((project) => selected.has(project.id)).length}`;
+  options.setAttribute("aria-busy", String(Boolean(pending)));
+  filterChatProjects();
   renderChatIntentControls();
 }
 
 async function saveChatProjects() {
-  if (!state.sessionId) return;
-  const projectIds = [...$("#chat-project-options").querySelectorAll("input:checked")]
-    .map((input) => input.value);
-  try {
-    const { chat } = await api(`/api/chats/${state.sessionId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ projectIds }),
-    });
-    state.selectedSession = { ...state.selectedSession, ...chat };
-    state.sessions = state.sessions.map((item) => item.id === chat.id ? chat : item);
-    state.chats = state.sessions;
-    renderChatProjectEditor(chat);
-  } catch (error) {
-    alert(error.message);
+  const id = state.sessionId;
+  if (state.surface !== "chat" || !id || state.selectedSession?.id !== id) return;
+  const projectIds = [...$("#chat-project-options").querySelectorAll("input:checked")].map((input) => input.value);
+  const existing = contextWrites.get(id);
+  if (existing) {
+    existing.projectIds = projectIds;
+    existing.version++;
     renderChatProjectEditor();
+    return;
+  }
+  const pending = { projectIds, version: 0 };
+  contextWrites.set(id, pending);
+  $("#chat-project-status").hidden = true;
+  renderChatProjectEditor();
+  // Serialize rapid changes per chat; later choices must reach the server last.
+  try {
+    let savedVersion;
+    do {
+      savedVersion = pending.version;
+      const { chat } = await api(`/api/chats/${encodeURIComponent(id)}`, {
+        method: "PATCH", body: JSON.stringify({ projectIds: pending.projectIds }),
+      });
+      const merge = (item) => item.id === id ? { ...item, projectIds: chat.projectIds } : item;
+      state.chats = state.chats.map(merge);
+      if (state.surface === "chat") state.sessions = state.sessions.map(merge);
+      if (state.surface === "chat" && state.sessionId === id && state.selectedSession?.id === id) {
+        state.selectedSession = merge(state.selectedSession);
+      }
+    } while (savedVersion !== pending.version);
+  } catch (error) {
+    if (state.surface === "chat" && state.sessionId === id) {
+      $("#chat-project-status").textContent = `Не удалось сохранить контекст: ${error.message}`;
+      $("#chat-project-status").hidden = false;
+    }
+  } finally {
+    contextWrites.delete(id);
+    if (state.surface === "chat" && state.sessionId === id) renderChatProjectEditor();
   }
 }
 
@@ -109,13 +161,18 @@ export function renderChatIntentControls() {
   select.value = state.chatActionProjectId ?? "";
   $("#chat-action-project-label").hidden = state.chatIntent !== "act";
   $("#chat-intent-hint").textContent = state.chatIntent === "act"
-    ? attached.length ? "Codex может изменить выбранный проект" : "Подключите проект в боковой панели"
+    ? attached.length ? "Codex может изменить выбранный проект" : "Подключите проект через «Контекст» в шапке чата"
     : hasModule("outline")
       ? "Можно создавать и редактировать документы Outline по вашему запросу. Файлы — только чтение."
       : "Файлы — только чтение";
 }
 
 export function bindChats() {
+  contextMenu = bindPopover($("#chat-context-trigger"), $("#chat-projects-editor"), {
+    onOpen: () => { $("#chat-project-search").value = ""; renderChatProjectEditor(); },
+  });
+  $("#chat-project-search").addEventListener("input", filterChatProjects);
+  $("#chat-project-options").addEventListener("change", () => void saveChatProjects());
   $("#new-chat")?.addEventListener("click", () => void createChat());
   document.querySelectorAll("[data-chat-intent]").forEach((button) => {
     button.addEventListener("click", () => setChatIntent(button.dataset.chatIntent));

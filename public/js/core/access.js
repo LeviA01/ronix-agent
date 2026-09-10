@@ -1,3 +1,6 @@
+import { openDialog, utilityReturnTarget } from "../layout/dialogs.js";
+import { setSidebarOpen } from "../layout/panels.js";
+
 export function hasModule(module) {
   const user = globalThis.ronixAccess?.user;
   return !user || user.modules.includes(module);
@@ -11,8 +14,8 @@ export function applyAccess() {
   document.body.dataset.admin = String(user.role === "admin");
   const link = document.querySelector("#admin-link");
   if (link) link.hidden = user.role !== "admin";
-  const learning = document.querySelector("#project-kind-learning");
-  if (!hasModule("development") && learning) { learning.checked = true; learning.disabled = true; }
+  const limits = document.querySelector("#show-limits");
+  if (limits) limits.hidden = user.role !== "admin";
 }
 
 const adminLink = document.querySelector("#admin-link");
@@ -39,7 +42,8 @@ adminLink?.addEventListener("click", async event => {
     });
   }
   if (accessDialog.open) return;
-  accessDialog.showModal();
+  setSidebarOpen(false);
+  openDialog(accessDialog, { returnFocus: utilityReturnTarget });
   if (!accessDialog.dataset.loaded) {
     try {
       const { mountAccess } = await import("/admin.js");

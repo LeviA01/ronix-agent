@@ -313,20 +313,6 @@
   font-weight: 650;
 }
 
-.project-kind-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-strong);
-  font-size: 12px;
-}
-
-.project-kind-option input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent);
-}
-
 .learning-mode {
   display: grid;
   width: 100%;

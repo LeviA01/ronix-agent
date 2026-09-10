@@ -4,9 +4,8 @@ import { $ } from "../core/dom.js";
 import { escapeHtml } from "../core/format.js";
 import { storeString } from "../core/storage.js";
 import { sessionViewToken } from "../core/session-view.js";
-import { isLearningProject } from "../features/context.js";
+import { currentProjectId, isLearningProject } from "../features/context.js";
 import { setPromptValue } from "../features/composer.js";
-import { setSidebarOpen } from "../layout/panels.js";
 import {
   bindTheoryMaterialsView,
   loadLearning,
@@ -372,7 +371,7 @@ export function renderEvents(scrollToBottom = true) {
   const hasArchivedMessages = state.surface === "chat" && state.archivedMessages.length > 0;
   if (events.length === 0 && !hasApprovals && !hasArchivedMessages && !state.hasMoreEvents && !state.liveResponse) {
     const chatSurface = state.surface === "chat";
-    const hasProject = chatSurface || Boolean($("#project").value);
+    const hasProject = chatSurface || Boolean(currentProjectId());
     const hasSessions = state.sessions.length > 0;
     const learning = isLearningProject();
     const emptyTitle = state.sessionId
@@ -386,7 +385,7 @@ export function renderEvents(scrollToBottom = true) {
       : chatSurface
         ? "Создайте первый чат"
       : !hasProject
-        ? "Добавьте проект"
+        ? state.surface === "learning" ? "Добавьте учебный проект" : "Добавьте проект разработки"
         : learning ? "Выберите режим" : hasSessions ? "Выберите сессию" : "В проекте пока нет сессий";
     const emptyDescription = state.sessionId
       ? chatSurface
@@ -401,7 +400,9 @@ export function renderEvents(scrollToBottom = true) {
       : chatSurface
         ? "Чаты объединяют контекст проектов, учёбы и общей памяти."
       : !hasProject
-        ? "Укажите каталог проекта в боковой панели."
+        ? state.surface === "learning"
+          ? "Добавьте учебный проект, чтобы открыть курс, теорию, практику и прогресс."
+          : "Добавьте рабочий проект, чтобы начать разработку."
         : learning
           ? "Курс, теория и практика сохраняются в отдельных долгоживущих сессиях."
           : hasSessions
@@ -410,7 +411,7 @@ export function renderEvents(scrollToBottom = true) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon" aria-hidden="true">R<span>↗</span></div>
-        <span class="empty-eyebrow">${chatSurface ? "Ваш собеседник" : "Пространство для идей и кода"}</span>
+        <span class="empty-eyebrow">${chatSurface ? "Ваш собеседник" : state.surface === "learning" ? "Учёба" : "Разработка"}</span>
         <h3>${emptyTitle}</h3>
         <p>${emptyDescription}</p>
         ${state.sessionId && !learning && !chatSurface ? `
@@ -427,10 +428,9 @@ export function renderEvents(scrollToBottom = true) {
     container.querySelectorAll("[data-starter]").forEach((button) => {
       button.addEventListener("click", () => setPromptValue(button.dataset.starter));
     });
-    container.querySelector("[data-add-project]")?.addEventListener("click", () => {
-      setSidebarOpen(true);
-      document.querySelector(".add-project").open = true;
-      $("#project-folder").focus();
+    container.querySelector("[data-add-project]")?.addEventListener("click", async () => {
+      const { openCreateProject } = await import("../features/projects.js");
+      openCreateProject();
     });
     container.querySelector("[data-create-session]")?.addEventListener("click", async () => {
       if (chatSurface) {

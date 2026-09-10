@@ -1,4 +1,5 @@
 import { $ } from "../core/dom.js";
+import { closePopovers } from "./popovers.js";
 
 const appShell = () => $(".app-shell");
 const chat = () => $(".chat");
@@ -165,6 +166,7 @@ function springSidebarTo(target, initialVelocity = 0) {
 }
 
 export function setSidebarOpen(open) {
+  closePopovers();
   if (!isMobileLayout()) {
     appShell()?.classList.toggle("sidebar-open", open);
     $("#open-sidebar")?.setAttribute("aria-expanded", String(open));
@@ -315,6 +317,7 @@ function bindSidebarGestures() {
         return;
       }
       dragSession.committed = true;
+      closePopovers();
       stopSpring();
       dragSession.originProgress = sidebarProgress > 0.01 && sidebarProgress < 0.99
         ? sidebarProgress
@@ -382,6 +385,10 @@ function bindSidebarGestures() {
 }
 
 export function bindLayoutControls({ closeLimits, closeSettings, closeCreateProject }) {
+  const header = $(".chat-head");
+  new ResizeObserver(() => {
+    chat()?.style.setProperty("--chat-header-height", `${header.offsetHeight}px`);
+  }).observe(header);
   $("#open-sidebar")?.addEventListener("click", () => setSidebarOpen(true));
   $("#close-sidebar")?.addEventListener("click", () => setSidebarOpen(false));
   $("#sidebar-backdrop")?.addEventListener("click", () => {

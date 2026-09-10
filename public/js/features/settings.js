@@ -1,4 +1,6 @@
+import { currentProjectId } from "./context.js";
 import { state } from "../core/state.js";
+import { isProjectSurface } from "../core/navigation.js";
 import { $, $$ } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { escapeHtml } from "../core/format.js";
@@ -6,12 +8,13 @@ import { storeString } from "../core/storage.js";
 import { setSidebarOpen } from "../layout/panels.js";
 import { rememberProject } from "./models.js";
 import { saveCurrentDraft } from "./composer.js";
+import { openDialog, closeDialog, utilityReturnTarget } from "../layout/dialogs.js";
 
 const settingsModal = () => $("#settings-modal");
 
 export function closeSettings() {
   const modal = settingsModal();
-  if (modal) modal.hidden = true;
+  if (modal) closeDialog(modal);
 }
 
 export function selectSettingsTab(tab) {
@@ -28,7 +31,7 @@ export function openSettings() {
   setSidebarOpen(false);
   renderSettingsProjects();
   selectSettingsTab(state.settingsTab);
-  settingsModal().hidden = false;
+  openDialog(settingsModal(), { returnFocus: utilityReturnTarget });
 }
 
 export function renderSettingsProjects() {
@@ -104,7 +107,6 @@ async function saveProjectSettings(form) {
       body: JSON.stringify({ name, path }),
     });
     state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
-    rememberProject($("#project").value || updated.id);
     const { loadProjects } = await import("./projects.js");
     await loadProjects();
   } catch (error) {
@@ -122,12 +124,18 @@ async function makeProjectLearning(projectId) {
       method: "PATCH",
       body: JSON.stringify({ kind: "learning" }),
     });
+    const wasSelected = state.surface === "development" && currentProjectId() === updated.id;
     state.projects = state.projects.map((item) => item.id === updated.id ? updated : item);
-    if ($("#project").value === updated.id) {
+    if (wasSelected) {
+      saveCurrentDraft();
       state.learningMode = "course";
       storeString("ronix-agent-learning-mode", state.learningMode);
+      state.navigation.projectsBySurface ??= {};
+      state.navigation.projectsBySurface.learning = updated.id;
+      state.navigation.projectsBySurface.development = null;
+      const { setSurface } = await import("./surfaces.js");
+      await setSurface("learning");
     }
-    rememberProject($("#project").value || updated.id);
     const { loadProjects } = await import("./projects.js");
     await loadProjects();
   } catch (error) {
@@ -146,7 +154,7 @@ async function removeProjectFromRonix(projectId) {
     return;
   }
   try {
-    const wasSelected = $("#project").value === project.id;
+    const wasSelected = isProjectSurface(state.surface) && currentProjectId() === project.id;
     if (wasSelected) {
       saveCurrentDraft();
       const { resetProjectSessionView } = await import("./sessions.js");
