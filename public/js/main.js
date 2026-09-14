@@ -5,6 +5,7 @@ import { api } from "./core/api.js";
 import { storeString } from "./core/storage.js";
 import { applyTheme, bindThemeControls } from "./layout/theme.js";
 import { bindLayoutControls, setSettingsOpen } from "./layout/panels.js";
+import { bindMobileHeader } from "./layout/mobile-header.js";
 import { setConnection } from "./features/context.js";
 import { bindRonixMenu } from "./features/ronix-menu.js";
 import { closeLimits, bindLimits } from "./features/limits.js";
@@ -37,6 +38,7 @@ export async function bootstrap() {
   bindMemory();
   bindSurfaces();
   bindRonixMenu();
+  bindMobileHeader();
   bindEventActions();
 
   $("#show-technical").checked = state.showTechnical;

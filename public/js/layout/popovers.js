@@ -9,6 +9,10 @@ export function bindPopover(trigger, panel, { placement = "bottom", onOpen } = {
   document.body.append(panel);
   panel.classList.add("navigation-popover");
   let pointerInside = false;
+  // A compact header can tuck the original trigger inside another popover.
+  // Use its visible anchor when that parent closes or keyboard focus returns.
+  const anchor = () => trigger.getClientRects().length ? trigger
+    : document.getElementById(trigger.dataset.popoverAnchor) ?? trigger;
   const items = () => [...panel.querySelectorAll("[data-popover-item]")]
     .filter((item) => !item.disabled && item.getClientRects().length);
 
@@ -19,7 +23,7 @@ export function bindPopover(trigger, panel, { placement = "bottom", onOpen } = {
     const top = viewport?.offsetTop ?? 0;
     const width = viewport?.width ?? window.innerWidth;
     const height = viewport?.height ?? window.innerHeight;
-    const rect = trigger.getBoundingClientRect();
+    const rect = anchor().getBoundingClientRect();
     panel.style.maxWidth = `${width - 24}px`;
     panel.style.maxHeight = `${height - 24}px`;
     const above = Math.max(0, rect.top - top - 20);
@@ -35,7 +39,7 @@ export function bindPopover(trigger, panel, { placement = "bottom", onOpen } = {
     if (panel.hidden) return;
     panel.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
-    if (restoreFocus && trigger.getClientRects().length) trigger.focus({ preventScroll: true });
+    if (restoreFocus && anchor().getClientRects().length) anchor().focus({ preventScroll: true });
   }
 
   function open(last = false) {

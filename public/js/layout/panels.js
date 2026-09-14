@@ -404,12 +404,18 @@ export function bindLayoutControls({ closeLimits, closeSettings, closeCreateProj
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      const activePanel = document.activeElement?.closest("#session-settings, #git-panel");
       setSidebarOpen(false);
       setSettingsOpen(false);
       setGitOpen(false);
       closeLimits?.();
       closeSettings?.();
       closeCreateProject?.();
+      if (activePanel) {
+        const target = isMobileLayout() ? $("#mobile-context-trigger")
+          : $(activePanel.id === "session-settings" ? "#toggle-settings" : "#toggle-git");
+        target?.focus({ preventScroll: true });
+      }
     }
   });
 

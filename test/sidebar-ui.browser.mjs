@@ -123,8 +123,15 @@ async function surface(page, name) {
   await page.locator("#surface-trigger").click();
   await page.locator(`[data-surface="${name}"]`).click();
 }
-async function chooseProject(page, id) {
+async function openProjectMenu(page) {
+  if (await page.locator("#mobile-context-trigger").isVisible()) {
+    await page.locator("#mobile-context-trigger").click();
+    await withinViewport(page, "#mobile-context-panel");
+  }
   await page.locator("#project-trigger").click();
+}
+async function chooseProject(page, id) {
+  await openProjectMenu(page);
   await page.locator(`[data-select-project="${id}"]`).click();
 }
 async function withinViewport(page, selector) {
@@ -147,7 +154,7 @@ try {
   const page = await openPage(data);
   await textIs(page, "#project-current", "Альфа");
   assert.equal(await page.locator("#sidebar #project-trigger, #sidebar #chat-projects-editor, #sidebar .add-project").count(), 0);
-  await page.locator("#project-trigger").click();
+  await openProjectMenu(page);
   await page.locator("#project-search").fill("бЕтА");
   assert.equal(await page.locator("[data-select-project]:visible").count(), 1);
   await page.locator("#project-search").press("ArrowDown");
@@ -189,12 +196,12 @@ try {
   data.delayedProject = null;
   console.log("PASS project navigation, drafts, reload, learning separation, stale responses");
 
-  await page.locator("#project-trigger").click();
+  await openProjectMenu(page);
   await page.locator("#project-search").fill("no such project");
   await textIs(page, "#project-search-empty", "Проекты не найдены");
   await page.keyboard.press("Escape");
   await focusIs(page, "#project-trigger");
-  await page.locator("#project-trigger").click();
+  await openProjectMenu(page);
   await page.locator("#add-project").click();
   await page.locator("#project-folder").fill("missing");
   await page.locator("#project-submit").click();
@@ -207,7 +214,7 @@ try {
   await page.locator("#project-submit").click();
   await textIs(page, "#project-current", "missing");
   await page.locator("#create-project-modal").waitFor({ state: "hidden" });
-  await page.locator("#project-trigger").click();
+  await openProjectMenu(page);
   await page.locator("#add-project").click();
   await page.locator("#project-folder").fill("forbidden");
   await page.locator("#project-submit").click();
@@ -269,12 +276,17 @@ try {
   await surface(page, "development");
   for (const theme of ["terminal", "neon", "moon", "obsidian-gold"]) {
     await page.evaluate(async (theme) => (await import("/js/layout/theme.js")).applyTheme(theme), theme);
-    for (const size of [{ width: 1280, height: 850 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
+    for (const size of [{ width: 1280, height: 850 }, { width: 500, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
       await page.setViewportSize(size);
       await page.emulateMedia({ reducedMotion: "reduce" });
-      await page.locator("#project-trigger").click();
+      if (size.width <= 760) {
+        assert.ok(await page.locator(".chat-head").evaluate((element) => element.offsetHeight <= 60));
+        assert.equal(await page.locator("#toggle-settings").isVisible(), false);
+      }
+      await openProjectMenu(page);
       await withinViewport(page, "#project-menu");
       await page.keyboard.press("Escape");
+      await focusIs(page, size.width <= 760 ? "#mobile-context-trigger" : "#project-trigger");
       if (size.width <= 760) await page.locator("#open-sidebar").click();
       await page.locator("#ronix-menu-trigger").click();
       await withinViewport(page, "#ronix-menu");
@@ -317,7 +329,22 @@ try {
   many.projects[0].name = "Очень длинное название рабочего проекта для проверки переноса текста в меню";
   for (let i = 0; i < 30; i++) many.projects.push({ id: `extra-${i}`, name: `Рабочий проект ${i}`, kind: "dev", path: `/projects/extra-${i}` });
   const mobile = await openPage(many, { width: 390, height: 844 });
-  await mobile.locator("#project-trigger").tap();
+  await mobile.evaluate(() => {
+    document.querySelector("#session-title").textContent = "Очень длинное название текущего диалога, которое не должно увеличивать высоту шапки";
+  });
+  assert.ok(await mobile.locator(".chat-head").evaluate((element) => element.offsetHeight <= 60));
+  await mobile.locator("#mobile-context-trigger").tap();
+  assert.equal(await mobile.locator("#mobile-context-panel #session-title").isVisible(), true);
+  await mobile.locator("#toggle-settings").tap();
+  assert.equal(await mobile.locator(".chat").evaluate((element) => element.classList.contains("settings-open")), true);
+  await withinViewport(mobile, "#session-settings");
+  await mobile.keyboard.press("Escape");
+  await focusIs(mobile, "#mobile-context-trigger");
+  await mobile.locator("#mobile-context-trigger").tap();
+  await mobile.locator("#toggle-git").tap();
+  assert.equal(await mobile.locator(".chat").evaluate((element) => element.classList.contains("git-open")), true);
+  await mobile.keyboard.press("Escape");
+  await openProjectMenu(mobile);
   await withinViewport(mobile, "#project-menu");
   assert.equal(await mobile.locator('[data-select-project="dev-a"]').textContent().then((text) => text.trim()), many.projects[0].name);
   await mobile.locator('[data-select-project="extra-29"]').tap();
@@ -336,7 +363,7 @@ try {
   await textIs(mobile, "#project-current", "Переименованный проект");
   await mobile.keyboard.press("Escape");
   await focusIs(mobile, "#open-sidebar");
-  await mobile.locator("#project-trigger").tap();
+  await openProjectMenu(mobile);
   await mobile.screenshot({ path: join(screenshots, "mobile-projects.png") });
   await mobile.close();
   console.log("PASS touch targets, long names, scrolling, removal, renaming and conversion");

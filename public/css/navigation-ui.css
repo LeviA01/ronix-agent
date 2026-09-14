@@ -34,6 +34,19 @@
 }
 .ronix-menu-trigger > svg { margin-left: auto; }
 .chat-title { flex: 1; min-width: 0; }
+.mobile-tool-label { display: none; }
+.mobile-context-trigger { display: none; }
+.mobile-context-panel .chat-title { flex: 0 0 auto; }
+.mobile-context-panel h2 { margin: 4px 0 8px; font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.mobile-context-panel .context-trigger { width: 100%; margin: 0; }
+.mobile-context-panel .context-trigger svg:last-child { margin-left: auto; }
+.mobile-context-panel .session-meta { display: flex; margin-bottom: 12px; white-space: normal; overflow-wrap: anywhere; }
+.mobile-context-panel .header-tool-button {
+  display: flex; gap: 12px; width: 100%; min-height: 44px; flex: 0 0 auto;
+  padding: 10px; text-align: left; font-size: 14px;
+}
+.mobile-context-panel .mobile-tool-label { display: inline; }
+.navigation-popover.mobile-context-panel { padding: 12px; }
 .chat-head:has(.context-trigger:not([hidden])) { padding-block: 10px 14px; }
 .context-trigger {
   display: flex;
@@ -176,16 +189,49 @@ body[data-theme] .session-settings, body[data-theme] .git-panel { top: calc(var(
 @media (hover: hover) and (pointer: fine) {
   .context-trigger:hover, .ronix-menu-trigger:hover, .popover-option:hover, .navigation-popover .chat-project-options label:hover, .project-dialog-close:hover { background: var(--surface-hover); }
 }
-.context-trigger:active, .ronix-menu-trigger:active, .popover-option:active, .project-dialog button:active { transform: scale(.97); }
+.context-trigger:active, .mobile-context-trigger:active, .ronix-menu-trigger:active, .popover-option:active, .project-dialog button:active { transform: scale(.97); }
 @media (max-width: 760px) {
-  .chat-head:has(.context-trigger:not([hidden])) { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 10px; }
+  .chat-head {
+    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px));
+    gap: 4px;
+  }
+  .mobile-context-trigger {
+    display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 44px;
+    padding: 8px; border: 0; border-radius: 9px; background: transparent;
+    color: var(--text); font-size: 15px; font-weight: 550; text-align: left;
+  }
+  #mobile-context-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-context-trigger svg { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .mobile-context-trigger[aria-expanded="true"] { background: var(--surface-raised); }
+  .mobile-context-status.session-meta {
+    display: block; flex: 0 0 6px; width: 6px; height: 6px; margin: 0; border-radius: 50%; background: var(--muted);
+  }
+  .mobile-context-status.running { background: var(--accent); }
+  .mobile-context-status.error { background: var(--danger); }
+  .chat-head .open-sidebar { width: 44px; height: 44px; flex-basis: 44px; }
+  .chat-head .interrupt-button { width: 44px; height: 44px; min-width: 44px; padding: 0; }
+  .chat-head .interrupt-button span { display: none; }
   .context-trigger { min-height: 44px; }
+  .mobile-context-panel .context-trigger span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+  .session-meta > span:last-child { min-width: 0; }
   .popover-search, .project-dialog input { font-size: 16px; }
   .popover-option, .navigation-popover .chat-project-options label { font-size: 14px; }
   .new-chat-button { min-height: 44px; padding-inline: 12px; font-size: 12px; }
   .project-dialog { padding: 18px; }
+  body[data-theme] .session-settings {
+    max-height: calc(var(--app-height) - var(--chat-header-height, 56px) - 20px);
+    overflow-y: auto;
+  }
+  .theory-tabs { top: calc(var(--chat-header-height, 57px) + 8px); }
+  .theory-tabs button, .intent-switch button { min-height: 44px; }
+  .chat:has(.theory-tabs:not([hidden])) .events { padding-top: 68px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .context-trigger, .ronix-menu-trigger, .popover-option, .project-dialog button { transition: none; }
-  .context-trigger:active, .ronix-menu-trigger:active, .popover-option:active, .project-dialog button:active { transform: none; }
+  .context-trigger, .mobile-context-trigger, .ronix-menu-trigger, .popover-option, .project-dialog button { transition: none; }
+  .context-trigger:active, .mobile-context-trigger:active, .ronix-menu-trigger:active, .popover-option:active, .project-dialog button:active { transform: none; }
 }

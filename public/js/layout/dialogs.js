@@ -15,7 +15,9 @@ function restoreFocus(modal) {
   if (element?.isConnected && element.getClientRects().length && getComputedStyle(element).visibility !== "hidden") {
     element.focus({ preventScroll: true });
   } else {
-    (document.querySelector("#project-trigger:not([hidden])") ?? utilityReturnTarget())?.focus({ preventScroll: true });
+    const fallback = [document.querySelector("#mobile-context-trigger"), document.querySelector("#project-trigger:not([hidden])"), utilityReturnTarget()]
+      .find((item) => item?.getClientRects().length && getComputedStyle(item).visibility !== "hidden");
+    fallback?.focus({ preventScroll: true });
   }
 }
 

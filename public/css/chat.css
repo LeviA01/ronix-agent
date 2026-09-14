@@ -82,6 +82,7 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 69px minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--chat-background);

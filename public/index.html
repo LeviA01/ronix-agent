@@ -112,15 +112,21 @@
                     >
                         <span></span><span></span><span></span>
                     </button>
+                    <button id="mobile-context-trigger" class="mobile-context-trigger" type="button"
+                        aria-haspopup="dialog" aria-expanded="false" aria-controls="mobile-context-panel" hidden>
+                        <span id="mobile-context-status" class="mobile-context-status" aria-hidden="true"></span>
+                        <span id="mobile-context-title">Начало работы</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+                    </button>
                     <div class="chat-title">
                         <button id="project-trigger" class="context-trigger" type="button" aria-haspopup="dialog"
-                            aria-expanded="false" aria-controls="project-menu" hidden>
+                            aria-expanded="false" aria-controls="project-menu" data-popover-anchor="mobile-context-trigger" hidden>
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3Z"/></svg>
                             <span id="project-current">Выбрать проект</span>
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
                         </button>
                         <button id="chat-context-trigger" class="context-trigger" type="button" aria-haspopup="dialog"
-                            aria-expanded="false" aria-controls="chat-projects-editor" hidden>
+                            aria-expanded="false" aria-controls="chat-projects-editor" data-popover-anchor="mobile-context-trigger" hidden>
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg>
                             <span id="chat-context-label">Контекст · 0</span>
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
@@ -165,6 +171,7 @@
                     <button
                         id="interrupt"
                         class="interrupt-button"
+                        aria-label="Остановить ответ"
                         disabled
                         hidden
                     >
@@ -180,6 +187,8 @@
                         <span>Стоп</span>
                     </button>
                 </header>
+
+                <div id="mobile-context-panel" class="mobile-context-panel" role="dialog" aria-label="Текущий диалог" hidden></div>
 
                 <div id="session-settings" class="session-settings" hidden>
                     <label class="setting-field model-field">
