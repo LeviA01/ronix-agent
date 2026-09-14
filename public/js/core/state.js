@@ -26,6 +26,7 @@ export const state = {
   historyReady: false,
   historyLoading: false,
   historyError: null,
+  followLatest: true,
   events: [],
   approvals: {},
   sessionRefreshTimer: null,

@@ -38,10 +38,6 @@ export function isSessionStateEvent(event) {
   ].includes(event.type);
 }
 
-export function isNearBottom(container) {
-  return container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-}
-
 export function visibleEvents(events) {
   return events.filter((event) => {
     if (event.type === "user.message") return true;

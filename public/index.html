@@ -233,6 +233,8 @@
                 <div
                     id="events"
                     class="events"
+                    tabindex="0"
+                    aria-label="История сообщений"
                     role="log"
                     aria-live="polite"
                     aria-relevant="additions text"
@@ -301,6 +303,10 @@
                 </section>
 
                 <div id="composer-shell" class="composer-shell">
+                    <button id="scroll-to-latest" class="scroll-to-latest" type="button"
+                        aria-label="К последним сообщениям" title="К последним сообщениям" aria-controls="events" hidden>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m-6-6 6 6 6-6"/></svg>
+                    </button>
                     <section id="approval-dock" class="approval-dock" aria-label="Ожидающие подтверждения" hidden>
                         <p id="approval-dock-status" class="approval-dock-status" role="status" aria-live="polite" aria-atomic="true"></p>
                         <div id="approval-dock-cards" class="approval-dock-cards"></div>
@@ -321,6 +327,10 @@
                             <select id="chat-action-project"></select>
                         </label>
                         <span id="chat-intent-hint">Ответ без изменения файлов</span>
+                    </div>
+                    <div id="chat-activity" class="chat-activity" role="status" aria-live="polite" aria-atomic="true" hidden>
+                        <span class="chat-activity-dot" aria-hidden="true"></span>
+                        <span id="chat-activity-label"></span>
                     </div>
                     <form id="prompt-form" class="composer" hidden>
                         <textarea

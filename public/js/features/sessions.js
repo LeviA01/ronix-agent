@@ -33,6 +33,8 @@ import {
 } from "./learning.js";
 import { connectEvents } from "../events/stream.js";
 import { renderEvents, renderLiveResponse, updateLiveResponse } from "../events/render.js";
+import { setHistoryScrollTop } from "../events/scroll.js";
+import { renderChatActivity } from "../events/activity.js";
 
 export function resetProjectSessionView() {
   rememberSessionView($("#events")?.scrollTop);
@@ -76,6 +78,7 @@ export function resetProjectSessionView() {
 
 export function renderSessionMeta(session) {
   state.selectedSession = session;
+  renderChatActivity();
   renderTheoryTabs();
   renderTheorySuggestions();
   const meta = $("#session-meta");
@@ -299,7 +302,7 @@ export async function selectSession(id) {
   if (!cached) $("#send").disabled = true;
   restoreDraft(id);
   renderEvents(!cached);
-  if (cached) $("#events").scrollTop = cached.scrollTop;
+  if (cached) setHistoryScrollTop(cached.scrollTop);
   renderSessions();
 
   try {

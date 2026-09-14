@@ -21,10 +21,13 @@ function ready(id: string) {
 
 test("reopened history keeps its cursor and scroll without sharing mutable arrays", () => {
   ready("cached");
+  state.followLatest = false;
   rememberSessionView(430);
+  state.followLatest = true;
   state.events.push({ sequence: 13 });
   const view = restoreSessionView("cached");
   assert.equal(view.scrollTop, 430);
+  assert.equal(state.followLatest, false);
   assert.deepEqual(state.events, [{ sequence: 12 }]);
   assert.equal(state.lastSequence, 12);
   assert.equal(state.hasMoreEvents, true);

@@ -8,6 +8,7 @@ let revision = 0;
 export function invalidateSessionView() {
   revision += 1;
   state.historyLoading = false;
+  state.followLatest = true;
 }
 
 export function sessionViewToken() {
@@ -31,6 +32,7 @@ export function rememberSessionView(scrollTop = 0) {
     liveTurnActive: state.liveTurnActive,
     liveResponse: state.liveResponse ? { ...state.liveResponse } : null,
     scrollTop,
+    followLatest: state.followLatest,
   });
   while (views.size > MAX_VIEWS) views.delete(views.keys().next().value);
 }

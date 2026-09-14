@@ -20,6 +20,8 @@ import {
   updateLiveResponse,
 } from "./render.js";
 import { setConnection } from "../features/context.js";
+import { setHistoryScrollTop } from "./scroll.js";
+import { renderChatActivity } from "./activity.js";
 
 export function updateApprovalState(event) {
   if (event.type === "approval.requested") {
@@ -75,6 +77,7 @@ export function handleEvent(event) {
   state.events.push(event);
   updateApprovalState(event);
   updateLiveResponse(event);
+  renderChatActivity();
   if (
     event.type === "material.generation.completed"
     && state.materialGeneration?.status === "running"
@@ -199,7 +202,7 @@ export async function loadOlderEvents(button) {
     }
     state.hasMoreEvents = hasMore;
     renderEvents(false);
-    container.scrollTop = container.scrollHeight - previousHeight + previousTop;
+    setHistoryScrollTop(container.scrollHeight - previousHeight + previousTop);
   } catch (error) {
     if (!isCurrent()) return;
     button.disabled = false;

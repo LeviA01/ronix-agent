@@ -19,11 +19,12 @@ import {
 } from "./format-event.js";
 import { renderAgentMessage } from "./markdown.js";
 import { renderMcpForm } from "./mcp-form.js";
+import { restoreHistoryScroll } from "./scroll.js";
+import { renderChatActivity } from "./activity.js";
 import {
   isAgentMessage,
   isCommandItem,
   isFileChangeItem,
-  isNearBottom,
   isToolItem,
   visibleEvents,
 } from "./classify.js";
@@ -77,6 +78,12 @@ export function updateLiveResponse(event, updateStatus = true) {
         text: "",
         detail: "Применяет изменения",
       };
+    } else if (item) {
+      state.liveResponse = {
+        mode: "working", itemId: item.id ?? null, text: "",
+        detail: ["webSearch", "web_search"].includes(item.type)
+          ? "Ищет информацию" : "Работает над задачей",
+      };
     }
     return;
   }
@@ -91,16 +98,29 @@ export function updateLiveResponse(event, updateStatus = true) {
   if (
     event.type === "codex.turn.completed"
     || event.type === "turn.interrupted"
+    || event.type === "turn.error"
+    || event.type === "session.stopped"
     || event.type === "session.error"
   ) {
     state.liveTurnActive = false;
     state.liveResponse = null;
-    if (updateStatus) setLocalSessionStatus(event.type === "session.error" ? "error" : "ready");
+    if (updateStatus) setLocalSessionStatus(event.type.endsWith("error") ? "error"
+      : event.type === "session.stopped" ? "stopped" : "ready");
   }
 }
 
 export function renderLiveResponse(container = $("#events"), allowScroll = true) {
   if (!container) return;
+  const previousTop = container.scrollTop;
+  try {
+    renderLiveContent(container);
+  } finally {
+    restoreHistoryScroll(previousTop, allowScroll);
+    renderChatActivity();
+  }
+}
+
+function renderLiveContent(container) {
   const existing = container.querySelector(".live-response");
   if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
     existing?.remove();
@@ -114,8 +134,6 @@ export function renderLiveResponse(container = $("#events"), allowScroll = true)
   }
 
   container.setAttribute("aria-busy", "true");
-  const shouldScroll = allowScroll && isNearBottom(container);
-  const isCurrent = sessionViewToken();
   const element = existing ?? document.createElement("article");
   element.className = `message agent live-response ${state.liveResponse.mode}`;
   element.innerHTML = `
@@ -137,11 +155,6 @@ export function renderLiveResponse(container = $("#events"), allowScroll = true)
     </div>
   `;
   if (!existing) container.append(element);
-  if (shouldScroll) {
-    requestAnimationFrame(() => {
-      if (isCurrent()) container.scrollTop = container.scrollHeight;
-    });
-  }
 }
 
 export function scheduleLiveRender() {
@@ -295,32 +308,35 @@ export function renderPendingApprovals() {
 
 export function appendVisibleEvent(event) {
   const container = $("#events");
-  const isCurrent = sessionViewToken();
+  const previousTop = container.scrollTop;
   if (isLearningProject() && state.learningMode === "theory" && state.theoryTab === "materials") {
     renderEvents(false);
     return;
   }
   container.querySelector(".empty-state")?.remove();
   const visible = state.showTechnical || visibleEvents([event]).length > 0;
-  const shouldScroll = isNearBottom(container);
   if (event.type === "codex.item.completed") {
     container.querySelector(".live-response")?.remove();
   }
   if (visible) appendEvent(event, container);
-  if (event.type === "codex.item.completed") {
-    renderLiveResponse(container);
-  }
-  if (shouldScroll) {
-    requestAnimationFrame(() => {
-      if (isCurrent()) container.scrollTop = container.scrollHeight;
-    });
+  renderLiveResponse(container, false);
+  restoreHistoryScroll(previousTop);
+}
+
+export function renderEvents(scrollToBottom = state.followLatest) {
+  const container = $("#events");
+  if (!container) return;
+  const previousTop = container.scrollTop;
+  try {
+    renderEventContent(container);
+  } finally {
+    restoreHistoryScroll(previousTop, scrollToBottom);
+    renderChatActivity();
   }
 }
 
-export function renderEvents(scrollToBottom = true) {
+function renderEventContent(container) {
   renderPendingApprovals();
-  const container = $("#events");
-  if (!container) return;
   const isCurrent = sessionViewToken();
   container.innerHTML = "";
   if (isLearningProject() && state.learningMode === "progress") {
@@ -448,9 +464,4 @@ export function renderEvents(scrollToBottom = true) {
   // Reopened history is already complete; do not replay entry animations.
   for (const element of container.children) element.classList.add("history-item");
   renderLiveResponse(container, false);
-  if (scrollToBottom) {
-    requestAnimationFrame(() => {
-      if (isCurrent()) container.scrollTop = container.scrollHeight;
-    });
-  }
 }

@@ -19,6 +19,8 @@ import { bindSurfaces, setSurface } from "./features/surfaces.js";
 import { loadModels, currentModel, updateSessionSettings } from "./features/models.js";
 import { bindEventActions } from "./events/stream.js";
 import { renderEvents } from "./events/render.js";
+import { bindChatScroll, jumpToLatest } from "./events/scroll.js";
+import { bindChatActivity } from "./events/activity.js";
 
 export async function bootstrap() {
   applyAccess();
@@ -40,6 +42,8 @@ export async function bootstrap() {
   bindRonixMenu();
   bindMobileHeader();
   bindEventActions();
+  bindChatScroll();
+  bindChatActivity();
 
   $("#show-technical").checked = state.showTechnical;
   $("#show-technical")?.addEventListener("change", (event) => {
@@ -86,6 +90,7 @@ export async function bootstrap() {
     if (!state.sessionId) return;
     const prompt = $("#prompt").value.trim();
     if (!prompt) return;
+    jumpToLatest();
     try {
       $("#send").disabled = true;
       await api(`/api/sessions/${state.sessionId}/turns`, {
