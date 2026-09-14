@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { AccessStore, proxyIdentity, USER_MODULES, type AccessUser } from "./access.js";
 import { config } from "./config.js";
@@ -79,7 +79,11 @@ export function createMultiUserServer(options: MultiUserOptions) {
         }
         throw new HttpError(404, "API route not found");
       }
-      if (url.pathname === "/admin" || url.pathname === "/admin.js" || url.pathname === "/access.css") {
+      // The standalone editor must also load its theme for admins without modules.
+      // Other users still receive shared styles through their normal runtime.
+      const adminTheme = user.role === "admin"
+        && ["/css/tokens.css", "/css/themes/obsidian-gold.css"].includes(url.pathname);
+      if (url.pathname === "/admin" || url.pathname === "/admin.js" || url.pathname === "/access.css" || adminTheme) {
         if (user.role !== "admin") throw new HttpError(403, "Требуются права администратора");
         const filename = url.pathname === "/admin" ? "admin.html" : url.pathname.slice(1);
         const type = filename.endsWith(".js") ? "text/javascript" : filename.endsWith(".css") ? "text/css" : "text/html";
@@ -138,12 +142,20 @@ export function createMultiUserServer(options: MultiUserOptions) {
 
 export async function startMultiUserServer(): Promise<void> {
   const list = (value: string | undefined) => (value ?? "").split(",").map(x => x.trim()).filter(Boolean);
+  const serviceHome = process.env.HOME ?? "";
+  const helper = process.env.RONIX_OUTLINE_HEADERS_HELPER ?? join(serviceHome, ".local/bin/outline-mcp-headers");
+  const keyFile = process.env.OUTLINE_API_KEY_FILE ?? join(serviceHome, ".config/codex-secrets/outline_api_key");
+  const fileAuth = existsSync(helper) && existsSync(keyFile);
+  if ((process.env.RONIX_OUTLINE_HEADERS_HELPER || process.env.OUTLINE_API_KEY_FILE) && !fileAuth) {
+    throw new Error("Outline headers helper or API key file is missing");
+  }
   const runtime: RuntimeConfig = {
     root: resolve(process.env.RONIX_USERS_DIR ?? join(config.dataDir, "users")),
     appRoot: process.cwd(), codexPath: config.codexPath ?? "/usr/bin/codex",
     authFile: process.env.RONIX_SHARED_AUTH_FILE ?? join(process.env.HOME ?? "", ".codex/auth.json"),
     ...(process.env.RONIX_OUTLINE_CONFIG ? { outlineConfig: readFileSync(process.env.RONIX_OUTLINE_CONFIG, "utf8") } : {}),
-    ...(process.env.OUTLINE_API_KEY ? { outlineApiKey: process.env.OUTLINE_API_KEY } : {}),
+    ...(fileAuth ? { outlineFileAuth: { helper, keyFile } }
+      : process.env.OUTLINE_API_KEY ? { outlineApiKey: process.env.OUTLINE_API_KEY } : {}),
     ...(process.env.RONIX_OWNER_SUBJECT ? { owner: {
       subject: process.env.RONIX_OWNER_SUBJECT,
       projectRoots: config.projectRoots,

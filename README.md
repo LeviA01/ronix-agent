@@ -342,7 +342,8 @@ POST /api/sessions/:id/approvals/:approvalId
 
 `npm run typecheck` проверяет типы, `npm test` — логику и серверные сценарии.
 При наличии Playwright и Chromium браузерные проверки навигации запускаются
-командой `node test/sidebar-ui.browser.mjs`. Если Playwright установлен отдельно,
+командой `node test/sidebar-ui.browser.mjs`, а раздела «Пользователи и доступ» —
+`node test/access-ui.browser.mjs`. Если Playwright установлен отдельно,
 передайте путь к его `index.mjs` последним аргументом. Проверки запускают локальный
 статический сервер, подменяют API тестовыми данными и сохраняют снимки экрана
 во временный каталог; рабочий сервер и проекты не используются.

@@ -92,6 +92,8 @@ test("gateway isolates users, enforces module rights, and applies revocation to 
     assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { modules: ["chat"] })).status, 200);
     const aliceChat = (await data(await call("owner", "/api/chats", "POST", {}))).chat;
     const bobChat = (await data(await call("bob", "/api/chats", "POST", {}))).chat;
+    // Shared styles must remain available to regular users through their runtime.
+    assert.match((await call("bob", "/css/tokens.css")).headers.get("content-type") ?? "", /text\/css/);
     assert.equal((await call("bob", `/api/admin/users/${bob.id}`, "PATCH", { chatModel: "model-assigned" })).status, 403);
     assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { chatModel: "model-assigned" })).status, 200);
     assert.equal((await call("bob", `/api/sessions/${bobChat.id}/settings`, "POST", { model: "gpt-5.5" })).status, 403);
@@ -136,5 +138,18 @@ test("gateway isolates users, enforces module rights, and applies revocation to 
     assert.equal((await call("owner", `/api/admin/users/${bob.id}`, "PATCH", { disabled: true })).status, 200);
     assert.equal((await call("bob", `/api/sessions/${bobChat.id}`)).status, 403);
     assert.equal((await call("owner", `/api/admin/users/${owner.id}`, "PATCH", { role: "user" })).status, 409);
+    // An administrator can repair module assignments without starting a runtime.
+    assert.equal((await call("owner", `/api/admin/users/${owner.id}`, "PATCH", { modules: [] })).status, 200);
+    const workerCount = workers.length;
+    for (const [path, type] of [["/admin", "text/html"], ["/admin.js", "text/javascript"],
+      ["/access.css", "text/css"], ["/css/tokens.css", "text/css"], ["/css/themes/obsidian-gold.css", "text/css"]]) {
+      const response = await call("owner", path!);
+      assert.equal(response.status, 200);
+      assert.ok(response.headers.get("content-type")?.startsWith(type!));
+      assert.ok((await response.text()).length > 0);
+    }
+    assert.equal((await call("owner", "/api/codex/models")).status, 403);
+    assert.equal(workers.length, workerCount);
+    assert.equal((await fetch(base + "/css/tokens.css")).status, 401);
   } finally { await gateway.shutdown(); rmSync(dir, { recursive: true, force: true }); }
 });
